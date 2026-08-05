@@ -29,8 +29,7 @@
    =========================================================== */
 
 (function () {
-  const PROXY_URL_FALLBACK = "PASTE_YOUR_ADULTING_WORKER_URL_HERE";
-
+  const PROXY_URL_FALLBACK = const PROXY_URL_FALLBACK = "https://bluebonnetproxy.dustin12342986.workers.dev";
   // Reads the Worker proxy URL from Settings -> Blue Bonnet Assistant if the
   // user set one there (no source editing required); falls back to the
   // constant above for anyone who'd rather edit this file directly.
