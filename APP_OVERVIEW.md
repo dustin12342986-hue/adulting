@@ -1,0 +1,235 @@
+# Adulting — Full App Description
+
+This document is a complete technical + functional description of the "Adulting" app, written so it can be pasted into another LLM as full context (e.g. to continue development, debug, or extend it).
+
+## 1. What it is
+
+Adulting is a single-user, client-side-only household management web app. It combines: a budget tracker (regular vs. discretionary spending), a household chore/maintenance checklist system, grocery expiration tracking, vehicle maintenance tracking, and trip-planning checklists — with optional two-way Google Calendar sync. There is no backend server, no database, and no login system. All data lives in the browser's `localStorage` on the device it's used on, and can be exported/imported as a JSON backup file.
+
+**Design intent:** the app is explicitly built for ADHD, autistic, and other neurodivergent users. This shapes real decisions, not just copy: checklist items are short and concrete rather than vague; every checklist status uses the same visual language everywhere (gray/amber/green dots + a red "attention" state); there's a "Focus mode" that shows one checklist item at a time instead of a long list; completed states show a plain reassurance message ("You're caught up" / "Nothing forgotten") instead of silence or nagging; a "needs attention" flag is a separate, deliberate signal from an unchecked box, so problems are distinguishable from things simply not-yet-done.
+
+**Origin of the core pattern:** the checklist/status/dashboard mechanic is adapted from a live-broadcast "readiness checklist" tool (originally: each production role has a pre/post checklist, a computed status of none/partial/done, a "signal up" I'm-ready toggle, a "request help" flag, and one live dashboard showing everyone's status). Adulting reuses that exact shape — checked-items-array → auto-computed status → dashboard-of-everything → a flag-it mechanism — but applies it to household areas, vehicles, and trips instead of production roles, adds due dates/recurrence (the original had none), and drops the no-login/shared-device model in favor of local single-user storage.
+
+## 2. Tech stack & architecture
+
+- Plain HTML/CSS/JavaScript. No framework, no bundler, no build step, no npm dependencies to install for the app itself.
+- Single global mutable `STATE` object (in `js/app.js`) is the one source of truth. Every user action mutates `STATE` then calls `persist()`, which does `saveState(STATE)` (writes to `localStorage`) and `render()` (redraws the current tab from scratch by rebuilding an HTML string and setting `innerHTML`).
+- No component framework — each tab has a `render<TabName>()` function that returns an HTML string built with template literals and `.map().join("")`. There is no virtual DOM; the whole `#main` panel is replaced on every state change. This is deliberately simple/naive but is fast enough at this data scale.
+- **Event handling is fully delegated.** Every interactive element carries a `data-action="..."` attribute (and often `data-id`, `data-index`, `data-phase`, `data-domain`, `data-task`). Three listeners are attached once, at startup, to `document.body`: `click`, `change`, and `submit`. Each looks up `[data-action]` on the event target (or its closest ancestor) and dispatches through a big `switch` statement (`handleAction`, `handleChange`, `handleSubmit` in `js/app.js`) to the actual mutation function. This avoids re-binding listeners after every re-render and avoids inline `onclick="..."` string-escaping problems with user-entered text.
+- Forms use a `data-form="<type>"` attribute on the `<form>` element; `handleSubmit` reads that to decide which save function to call (e.g. `data-form="bill"` → `saveBillForm(form)`).
+- `collectFormData(form)` is a generic helper that reads a submitted form's fields (including checkboxes) into a plain object via `FormData`.
+- A single generic modal system (`openModal(html)` / `closeModal()`) renders arbitrary HTML into `#modalRoot` with a backdrop; clicking the backdrop or a `data-action="close-modal"` element closes it. Used for all "add/edit" forms and the "needs attention" flag form.
+- "Expanded/collapsed" state for cards (which household area, vehicle, or trip is currently showing its full detail) is a UI-only `Set` (`expandedIds`), not persisted — it resets when you switch tabs.
+- `toast(msg)` shows a small floating confirmation message for ~2.6 seconds after actions like saving or syncing.
+
+## 3. File structure
+
+```
+organize-it/
+  index.html                          — page shell: hero banner, sidebar nav (7 tabs), #main, #boardRoot, #onboardingRoot, #modalRoot, #toastRoot; loads the 5 scripts below in order
+  css/style.css                        — all styling; CSS custom properties define the color system (--done, --partial, --none, --attention, etc.) reused consistently across every tab, plus per-theme variable blocks
+  js/data.js                           — static reference/default data (see §5)
+  js/state.js                          — pure functions: persistence (localStorage load/save) + all status/date computation logic. No DOM code.
+  js/calendar.js                        — Google Calendar integration module (IIFE named `Calendar`), isolated from the rest of the app
+  js/app.js                             — everything else: global STATE, rendering for all 7 tabs, all CRUD/mutation functions, event delegation wiring, init()
+  js/blue-bonnet-widget-organize.js      — self-contained chat-widget IIFE (Blue Bonnet), see §13
+  README.md                             — user-facing setup instructions (how to run a local server, how to create Google OAuth credentials, Blue Bonnet setup)
+  APP_OVERVIEW.md                        — this file
+```
+
+Load order in `index.html` matters: `data.js` → `state.js` → `calendar.js` → `app.js` → `blue-bonnet-widget-organize.js`, then `app.js`'s `DOMContentLoaded` handler calls `init()`. Blue Bonnet's own top-level IIFE runs synchronously as soon as its script tag is parsed (it just mounts UI at that point; it doesn't read `window.STATE` until a message is actually sent, by which point `init()` has long since run).
+
+## 4. Running it
+
+No build. Must be served over `http://` (not opened as a `file://` URL), because Google's OAuth sign-in popup will not authorize a `file://` origin. Instructions given to the user: `python3 -m http.server 8000` from the `organize-it/` folder, then open `http://localhost:8000`.
+
+## 5. Data model
+
+### 5.1 Top-level `STATE` shape (defined in `state.js` → `defaultState()`)
+
+```js
+{
+  version: 1,
+  settings: {
+    householdName: "Our Household",
+    googleClientId: "",          // pasted in by the user from their own Google Cloud project
+    calendarConnected: false,     // not actually used as source of truth (Calendar.isConnected() is); kept for forward compat
+    defaultCalendarId: "primary",
+  },
+  bills: [ /* Bill */ ],
+  assets: [ /* HouseholdAsset */ ],
+  groceries: [ /* GroceryItem */ ],
+  vehicles: [ /* Vehicle */ ],
+  trips: [ /* Trip */ ],
+}
+```
+
+Persisted under `localStorage` key `adulting-state-v1`. `loadState()` merges saved JSON over `defaultState()` (so new settings fields added later degrade gracefully for existing users).
+
+### 5.2 Bill (Budget tab)
+
+```js
+{
+  id, name, amount: Number,
+  dueDay: Number,              // day-of-month, 1-31 (clamped to the actual last day of the current month when computing this period's due date)
+  type: "regular" | "discretionary",
+  category: String,            // from BUDGET_CATEGORIES in data.js
+  recurring: Boolean,          // true = repeats monthly (affects the Google Calendar RRULE)
+  paidPeriods: { "2026-08": true, ... },  // keyed by "YYYY-MM", toggled by the paid checkbox
+  calendarEventId: String|null, // Google event id, once synced, so re-syncing PATCHes instead of duplicating
+}
+```
+
+`BUDGET_CATEGORIES` (data.js) — Regular: Rent/Mortgage, Utilities, Internet, Phone, Insurance, Car Payment, Groceries, Debt Payment, Childcare, Other Regular. Discretionary: Dining Out, Entertainment, Subscriptions, Shopping, Hobbies, Travel Fund, Other Discretionary.
+
+### 5.3 HouseholdAsset (Household tab)
+
+```js
+{
+  id, name, icon,                 // e.g. "Kitchen", "🍳"
+  recurrence: { type: "weekly"|"monthly", interval: 1 },
+  items: [ { text: String, checked: Boolean }, ... ],
+  currentPeriodKey: String,        // e.g. "2026-W32" or "2026-08" — used to detect period rollover
+  dueDate: "YYYY-MM-DD",           // end of the current period (Sunday for weekly, last day of month for monthly)
+  signalUp: Boolean,               // "I'm calling this fully caught up" — independent of checklist completion
+  completedAt: ISOString|null,
+  needsAttention: { flag: Boolean, note: String, requestedAt: ISOString },
+  calendarEventId: String|null,
+}
+```
+
+Default templates in `DEFAULT_HOUSEHOLD_ASSETS` (data.js): Kitchen, Bathroom(s), Living Room, Bedroom(s), Laundry (all weekly), HVAC/Filters, Safety Checks, Yard/Exterior (all monthly) — each with 3-6 short checklist items. Users can also add a blank "custom" area and add/remove items freely.
+
+### 5.4 GroceryItem (Groceries tab)
+
+```js
+{ id, name, qty: Number, purchaseDate: "YYYY-MM-DD", expirationDate: "YYYY-MM-DD", used: Boolean, thrown: Boolean }
+```
+
+`SHELF_LIFE_DB` (data.js) — ~55 common grocery items mapped to approximate shelf-life in days (e.g. `milk: 7`, `"chicken (raw)": 2`, `"frozen vegetables": 240`). When adding an item, if the user leaves expiration blank, `suggestExpiration(name)` does a substring match against this table (falls back to 7 days) and `expirationDate = purchaseDate + suggested days`.
+
+### 5.5 Vehicle & VehicleTask (Vehicles tab)
+
+```js
+Vehicle: { id, name, year, make, model, mileage: Number, tasks: [ VehicleTask ] }
+
+VehicleTask: {
+  id, title,
+  intervalDays: Number|null, intervalMiles: Number|null,   // whichever is set is tracked; both can be set ("both")
+  lastDoneDate: "YYYY-MM-DD"|null, lastDoneMileage: Number|null,
+  dueDate: "YYYY-MM-DD"|null,       // = lastDoneDate/creation + intervalDays
+  dueMileage: Number|null,          // = lastDoneMileage/creation mileage + intervalMiles
+  needsAttention: { flag, note },
+  calendarEventId: String|null,
+}
+```
+
+`DEFAULT_VEHICLE_TASKS` (data.js), seeded automatically for every new vehicle: Oil change (182 days / 5000 mi), Tire rotation (182 days / 6000 mi), Tire pressure check (30 days), Engine air filter (365 days / 12000 mi), Brake inspection (12000 mi), Battery check (365 days), Wiper blades (365 days), State inspection (365 days), Registration renewal (365 days).
+
+### 5.6 Trip (Travel tab)
+
+```js
+{
+  id, name, destination, startDate: "YYYY-MM-DD", endDate,
+  prep: [ { text, checked, dueDate } ],       // dueDate = startDate − leadDays (computed once at trip creation)
+  packing: [ { text, checked } ],
+  departureDay: [ { text, checked } ],
+  needsAttention: { flag, note },
+}
+```
+
+`DEFAULT_TRAVEL_TEMPLATE` (data.js) has three lists:
+- **prep** (each with a `leadDays` before departure): Book/confirm time off (14d), Get a haircut (7d), Check weather (5d), Pick outfits (3d), Right shoes for the trip (3d), Refill/pack medications (3d), Check passport/ID expiration (14d), Arrange pet/plant/mail care (5d).
+- **packing** (no individual due dates, just a checklist): clothes, sleepwear, underwear/socks, right shoes, jacket/layer, toiletries, medications, phone charger, headphones, wallet/ID/passport, tickets/confirmations, comfort item.
+- **departureDay**: devices packed, phone charged, chargers actually unplugged and packed, bag matches packing list, house secure, directions/tickets ready.
+
+This directly addresses the "getting the right shoes / right haircut / right clothes, make sure nothing is left behind" requirement — those are explicit line items, not implied.
+
+## 6. Core computation logic (all pure functions in `state.js`)
+
+- `computeStatus(items)` → `"none" | "partial" | "done"` from a `{checked}[]` array. Zero checked = none, all checked = done, otherwise partial. This is the single function that drives every status dot/pill in the app.
+- `currentPeriodInfo(recurrence, now)` → `{ key, dueDate }`. Weekly periods are keyed by ISO week (`isoWeekKey`, e.g. `"2026-W32"`) with `dueDate` = the Sunday ending that week. Monthly periods are keyed `"YYYY-MM"` with `dueDate` = last day of the month.
+- `refreshRecurringTask(task)` — called on every app load for every household asset (`refreshAll()` in `app.js`). If the asset's stored `currentPeriodKey` doesn't match the freshly computed one, it resets all `items[].checked` to false, clears `signalUp`, and updates `dueDate`/`currentPeriodKey`. **`needsAttention` is deliberately NOT cleared by period rollover** — it's a separate signal that only a manual "mark resolved" clears, since a flagged problem doesn't go away just because a new week started.
+- `isTaskOverdue(task)` — true if `computeStatus(items) !== "done"` and today's date is past `task.dueDate`.
+- `vehicleTaskStatus(task, vehicle)` → `{ overdue, dueSoon, dueDateISO, dueMiles }`. Overdue if either the date has passed OR current mileage has reached/passed `dueMileage`. "Due soon" = within 14 days or within 500 miles. If both date and mileage are tracked, whichever condition triggers first wins (checked independently, either can flip `overdue`/`dueSoon`).
+- `groceryStatus(item)` → `"resolved" | "expired" | "soon" | "fresh"`. `"resolved"` if used/thrown. Otherwise `expired` if past expiration, `soon` if ≤3 days out, else `fresh`.
+- `tripProgress(trip)` → combines `prep + packing + departureDay` into one array and runs `computeStatus` on the union, plus a checked/total count — so a trip's dashboard status dot reflects all three phases together.
+- `billDueDateThisPeriod(bill)` — computes this calendar month's due date from `bill.dueDay`, clamped to the actual number of days in the current month (so `dueDay: 31` correctly resolves to Feb 28/29 in February).
+- `currentBillingPeriodKey()` — `"YYYY-MM"` for the current month, used as the key into `bill.paidPeriods`.
+
+## 7. Feature breakdown by tab
+
+**Dashboard** (`renderDashboard`) — Pulls together: (1) an attention banner listing every flagged household area/vehicle task/trip plus any expired groceries, or a green "nothing flagged" reassurance if empty; (2) a "Today & this week" table (`collectTodayItems()`) merging anything due within 7 days across bills, household chores, vehicle maintenance, groceries expiring soon, and trip prep items — sorted and capped at 12 items, or a reassurance message if empty; (3) an overview grid of one summary card per tab (household areas caught up, vehicle count, groceries expiring soon, trips planned, budget total + paid count), each clickable to jump to that tab.
+
+**Budget** (`renderBudget`) — Summary cards for total/regular/discretionary spend this month. A table of all bills sorted by due day, each row: a checkbox to mark paid for the current month (`togglePaid`), a Regular/Discretionary tag, category, amount, due date (with "in N days"/"N days overdue" phrasing via `fmtRelativeDays`), and Edit/Sync-to-calendar/Delete buttons. "Sync all to calendar" bulk-syncs every bill.
+
+**Household** (`renderHousehold` / `renderAssetDetail`) — Grid of area cards; each collapsed card shows icon, name, a status dot (or a red attention dot if flagged), recurrence description, due date, and a progress bar. Clicking the header expands it to show the full checklist (checkboxes with labels, an inline "add item" mini-form, a remove (✕) button per item), the "fully caught up" signal-up checkbox, and action buttons (flag attention, sync to calendar, delete area). "+Add area" opens a modal to either pick one of the 8 templates (auto-populates icon + items) or create a blank custom area, and choose weekly/monthly recurrence.
+
+**Groceries** (`renderGroceries`) — "Add groceries" modal has a text input with an HTML `<datalist>` autocomplete sourced from all `SHELF_LIFE_DB` keys, quantity, purchase date (defaults today), and an optional expiration date (auto-suggested if left blank). Active items are listed sorted expired-first, then soon, then fresh, each with a colored status pill and "Used it"/"Toss" buttons. A collapsed history of the last 10 resolved (used/thrown) items sits below with a "Remove" (permanent delete) option.
+
+**Vehicles** (`renderVehicles` / `renderVehicleDetail`) — Cards per vehicle showing name, year/make/model, mileage, and a status dot that's red if any task is overdue, amber if any is due soon, else green. Expanding shows a mileage-update mini-form and a table of all maintenance tasks with due date and/or due mileage, a status pill, and "Mark done" (recomputes next due date/mileage from today's date and current mileage), a calendar-sync button (skipped with a toast if the task has no date component, i.e. mileage-only), and a flag-attention button.
+
+**Travel** (`renderTravel` / `renderTripDetail`) — Cards per trip with destination, start date, "N days out" countdown, a combined progress bar across all three phases, and (when 100% complete) a "You're all set for this trip. Nothing forgotten." reassurance. Expanding shows three separate checklist sections (Before the trip / Packing list / Departure day), each with its own "Focus mode" button. Prep items display their computed due date as "in N days"/"N days overdue" next to the label. Bottom actions: flag attention, sync prep dates to calendar (creates one non-recurring event per prep item with a due date), delete trip.
+
+**Focus mode** (`startFocusMode`, `renderFocusModal`, `focusToggleCurrent`, `focusNext`) — A modal-based, one-item-at-a-time view for a given trip phase. Starts at the first unchecked item. Shows "N of TOTAL", the item text large, a Done checkbox, and Exit/Next buttons. Checking the box toggles that item in the real trip data immediately (auto-saves). When you've stepped past the last item, it shows a "That's everything on this list" confirmation and exits focus mode. This is UI-only state (`focusState` variable), not persisted.
+
+**Settings** (`renderSettings`) — Household name field; Google Calendar connection (Client ID input, Calendar ID input, Connect/Reconnect/Disconnect buttons, a connected/not-connected status pill); data section with Export backup (downloads a timestamped `.json` of the entire `STATE` object via a Blob + temporary `<a download>`), Import backup (file input, parses JSON and replaces `STATE` wholesale via `Object.assign(defaultState(), parsed)`), and Reset all data (confirms via native `confirm()`, then wipes to `defaultState()`).
+
+## 8. Google Calendar integration (`js/calendar.js`)
+
+Implemented as an IIFE-scoped module `Calendar` with no external dependencies beyond Google's own script, loaded lazily.
+
+- **Auth:** Google Identity Services (GIS) token client (`google.accounts.oauth2.initTokenClient`), implicit OAuth flow — no backend, no refresh token, no client secret. Scope requested: `https://www.googleapis.com/auth/calendar.events` (can read/write events but can't manage the calendar list itself, matching least-privilege). The user supplies their own OAuth Client ID (created in their own Google Cloud project) via Settings; there is no shared/hardcoded client ID.
+- **Token lifecycle:** `Calendar.init(clientId)` loads the GIS script (once) and creates the token client. `Calendar.connect()` is the interactive path — must be called from a real user click (popup-blocker requirement) — and resolves once an access token is granted. `Calendar.ensureToken()` attempts a **silent** reauth (`prompt: ""`) first, for cases where the user already granted consent earlier in the session; used automatically before any sync action rather than always forcing an interactive popup. Tokens (and their expiry) are cached in `sessionStorage` (`adulting-gcal-token`) so a page refresh within the same browser tab session doesn't require re-consenting; they do NOT survive closing the tab, and there is no server-side refresh token, so long-term unattended sync is not possible with this architecture — the user has to have the tab open and occasionally re-click Connect (roughly hourly, GIS token lifetime).
+- **Event tagging:** every event Adulting creates carries `extendedProperties.private = { adulting: "1", kind: "bill"|"household"|"vehicle"|"travel", refId: <local entity id> }`. This lets the app query only its own events (`privateExtendedProperty=adulting=1` filter in `listAdultingEvents`) without touching or listing anything else on the user's calendar, and lets `upsertEvent` be idempotent — if `existingEventId` is stored on the local entity, it PATCHes that event instead of creating a duplicate (falling back to create if the stored event was deleted on Google's side).
+- **Event shape:** all-day events (`start: {date}`, `end: {date}`), a 9am-same-day popup reminder override, and an optional `recurrence: ["RRULE:..."]` — monthly bills use `RRULE:FREQ=MONTHLY;BYMONTHDAY=N`, weekly household chores use `RRULE:FREQ=WEEKLY;BYDAY=SU`, monthly household chores use `RRULE:FREQ=MONTHLY;BYMONTHDAY=<last day used at sync time>`. Vehicle tasks and trip prep items sync as one-off (non-recurring) events since their due dates move dynamically based on mileage/last-done-date rather than following a fixed calendar rule.
+- **`listAdultingEvents(calendarId, timeMinISO, timeMaxISO)`** exists as a read/reconciliation primitive (defined and functional) but is not yet wired into any UI — see Known Gaps below.
+- **Honesty boundary documented for the user:** the README explicitly states calendar sync can tell you *when* something is due (it owns that schedule) but cannot know whether a bill was actually paid, since Calendar has no bank visibility — payment is tracked purely by the in-app checkbox.
+
+## 9. Visual/design system (`css/style.css`)
+
+CSS custom properties define one consistent status vocabulary used everywhere: `--done` (green), `--partial` (amber), `--none` (gray), `--attention` (red), each with a matching light `-bg` tint for pills/banners. Status is rendered two ways depending on context: a plain `.status-dot` (small colored circle, used on card headers) or a `.status-pill` (colored background + label, used in tables). `prefers-reduced-motion` is respected globally. Buttons/inputs have visible `:focus-visible` outlines. Layout is a fixed left sidebar (7 nav buttons, collapses to a horizontal scroll strip under 820px) + a single main content column, generous 14-18px padding, and card-based grids (`.grid` = `repeat(auto-fill, minmax(280px,1fr))`).
+
+## 10. Known gaps / natural next steps
+
+- No automated payment detection — reading calendar/bank data to auto-mark a bill "paid" is out of scope (would need real bank/Plaid-style integration); currently a manual checkbox.
+- No grocery-delivery API integration (Instacart etc.) — groceries are logged manually; "when you order groceries" is handled as "log what you bought," not an automated import.
+- `listAdultingEvents` (reading events back from Calendar, e.g. to catch something a user added directly on Google Calendar) is implemented in `calendar.js` but has no UI hook yet — a natural "reconciliation" feature to build next.
+- Multi-person household support doesn't exist — no login, no per-person assignment of chores, single shared local browser storage only (per the design brief, which intentionally dropped the original broadcast tool's shared-device/no-login model in favor of a personal local app; multi-device sync would require adding a real backend).
+- Vehicle "type" field described in `DEFAULT_VEHICLE_TASKS` as `"both"/"date"/"mileage"` isn't actually read anywhere — in practice the code just checks whichever of `intervalDays`/`intervalMiles` is non-null on each task, so the `type` field is vestigial/for-reference only.
+- No automated tests beyond a one-off manual jsdom smoke test run during development (not included in the delivered files) — no test suite ships with the app.
+- Data is single-browser/single-device only unless the user manually exports/imports the JSON backup.
+
+## 11. Naming
+
+The app was renamed twice: from an earlier placeholder "Budgeting App" project to "Organize It" (reflecting its full scope beyond budgeting alone), then to its current name, **Adulting**. The project folder on disk is still literally named `organize-it/` — only the display name and internal identifiers were updated a second time, not the delivery folder path; every user-visible string, `localStorage`/`sessionStorage` key, and Google Calendar event tag was updated to "Adulting"/`adulting-*`.
+
+## 12. Redesign: themes, board mode, icon styles, onboarding & calendar import
+
+A second pass added: a themeable visual system, a decorative header, a shareable status board, a colorful/minimal icon toggle, and a first-run Google onboarding flow that seeds the app from the user's existing Calendar. All of it lives in the same four files (no new files except this doc).
+
+**Theming (`css/style.css`, `js/app.js`).** `:root` now only holds theme-independent tokens — status colors (`--done/--partial/--none/--attention` + their `-bg` tints), radius, shadow, font — deliberately kept constant across every theme so a green/red light means the same thing no matter what palette is active. Everything else (`--bg`, `--surface`, `--text`, `--primary`, plus hero-banner-specific tokens like `--hero-sky-top`/`--hero-ocean`/`--hero-sun`) is defined per theme under `html[data-theme="..."]` selectors: `sunset` (default — pastel peach/pink/blue/yellow), `mono-light`, `mono-dark`, and `custom` (every color derived from a single `--accent-h` hue number via `hsl()`, so picking one hue re-tints the entire UI as a monochromatic spectrum). `applyTheme()` in `app.js` sets `document.documentElement.dataset.theme` and the `--accent-h` custom property, and is called at the top of every `render()` so it's always in sync with `STATE.settings.theme`/`customHue`. The Settings tab renders theme swatches (`data-action="set-theme"`) and, only when "custom" is active, a hue `<input type="range" id="hueSlider">` — dragging it fires a raw (non-delegated) `input` listener for live preview without a full re-render, and releasing it fires the normal delegated `change` → `preview-hue` action that actually persists the value.
+
+**Hero banner + logo (`js/app.js`: `heroBannerMarkup()`, `logoMarkMarkup()`).** A full-width inline SVG (sky gradient, sun, two cloud clusters, a palm-frond silhouette, a two-tone ocean band with a foam-line "breaking wave") sits in `<header class="hero-banner" id="heroBanner">`, above the sidebar+main row (`index.html` now wraps everything in `#appShell` = banner + `#app`). Every fill in the SVG is set via inline `style="fill:var(--hero-...)"` rather than plain attributes, so it re-tints automatically whenever the theme changes without regenerating the markup — `applyTheme()` only re-injects it when explicitly called (theme switches), not on every render. `logoMarkMarkup(size)` is a compact version of the same scene (sun + horizon in a rounded square) reused as the sidebar brand mark; the static favicon in `index.html`'s `<link rel="icon">` is a hand-authored data-URI SVG of the same idea, fixed-color (favicons can't read CSS variables).
+
+**Status-light board (`collectStatusLights()`, `renderLightGrid()`, Board Mode in `js/app.js`).** `collectStatusLights()` is the single function that turns all of `STATE` into a flat list of `{label, sub, status}` — one entry per household area, per vehicle (aggregated: `attention` if any task overdue/flagged, `partial` if any due soon, else `done`), one for the current month's budget (`attention` if any bill is both unpaid and past due, else scaled by paid-count), one for groceries (aggregated by worst status among active items), and one per trip (`tripProgress` status, or `attention` if flagged). `renderLightGrid()` renders that list either as `.light-card`/`.light-grid` (embedded in the Dashboard, under a "Status board" section) or `.board-light-card`/`.board-light-grid` (full-size, for Board Mode) — same data, two CSS treatments. **Board Mode** is a second top-level render target: `#boardRoot` (sibling of `#appShell` in `index.html`, hidden by default). `enterBoardMode()`/`exitBoardMode()` toggle a UI-only `boardMode` boolean, set/clear `location.hash = "board"`, and `render()` branches to `renderBoardPage()` instead of the normal tab renderer whenever `boardMode` is true — so it also auto-activates on load if the page URL already has `#board` (useful for bookmarking a tablet directly into board view). `renderBoardPage()` shows the household name, a live clock/date, the light grid at a larger size, and an "Exit board view" button; it re-renders itself every 60 seconds on a `setInterval` (cleared on exit) so a screen left open all day stays current without any interaction. The nav sidebar's "Board view" button and the Dashboard's "Open full-screen board view" button both call `openBoardMode(true)`, which opens it in a new tab (`window.open(...+"#board")`) rather than navigating away from the current one — deliberately, so someone can keep working in the main app while the board stays up on a second screen. Caveat carried into the README: since there's no backend, the board only reflects the data already in that browser's `localStorage` — it's a calmer view of the same local data, not a real multi-device broadcast.
+
+**Icon style toggle (`data.js`: `MINIMAL_ICON_SVGS`, `EMOJI_ICONS`; `app.js`: `icon()`).** Two parallel lookup tables share the same keys (`kitchen`, `bathroom`, `vehicles`, `travel`, `budget`, `dashboard`, `board`, `flag`, `calendar`, `focus`, etc.) — `EMOJI_ICONS` maps each to an emoji, `MINIMAL_ICON_SVGS` maps each to raw inner-SVG shape markup (simple hand-drawn line icons: circles, rects, short paths — no external icon library). `icon(key, size)` in `app.js` checks `STATE.settings.iconStyle` and returns either an emoji `<span>` or a wrapped `<svg viewBox="0 0 24 24" stroke="currentColor" ...>`, so the same call site works for both styles. This replaced hardcoded emoji at the main call sites: sidebar nav items, the Dashboard's five overview cards, household area cards (each `HouseholdAsset` now also stores a `key`, e.g. `"kitchen"`, set from the template it was created from, or `"custom"` for a blank area — this is what `icon(a.key)` looks up), vehicle cards, and trip cards. It was *not* threaded through every inline decorative emoji in button labels/reassurance banners (📅/🚩/🎯/✅/🎉) — those are copy flourishes, not entity icons, and converting them wasn't worth the added complexity. Settings → Icon style renders both options with a live sample so the difference is visible before choosing.
+
+## 13. Blue Bonnet — the built-in assistant widget
+
+`js/blue-bonnet-widget-organize.js` is a self-contained IIFE, uploaded by the user and integrated in a third pass. It injects its own `<style>` block and a fixed-position chat bubble + panel directly onto `document.body` (independent of `#appShell`/`#boardRoot`, so it floats above everything at a near-max z-index) — no changes to `index.html` beyond one `<script>` tag at the very end of `<body>`. It has zero dependencies on the rest of the codebase other than reading `window.STATE` (optional) and `window.STATE.settings.blueBonnetProxyUrl` (optional).
+
+**What it is.** A chat assistant scoped only to this app: a large hardcoded knowledge-base string (`ADULTING_KB`, renamed from the uploaded file's original `ORGANIZE_KB` to match the current app name) covering household/life organization and ADHD/autism-affirming organizing practice, plus a set of quick-reply chips. It is explicitly *not* shared with the author's other, unrelated apps (broadcast-crew tools, a school/"Campus" app) — each gets its own isolated Blue Bonnet instance and knowledge base by design.
+
+**How it talks to Claude.** It does not call the Anthropic API directly (that would expose an API key in client-side code). Instead `sendMessage()` POSTs `{ max_tokens, system, messages }` (Anthropic Messages API shape) to a **Cloudflare Worker proxy URL** that the user deploys themselves and holds the real API key server-side. The system prompt is assembled fresh per request: static persona/instructions + `ADULTING_KB` + (if available) a live-data block from `buildLiveContext()`.
+
+**Live household context (`buildLiveContext()`).** Reads `window.STATE` — already exposed by `render()` in `js/app.js` (`window.STATE = STATE;`, added specifically for this integration and kept in sync because `render()` runs after every mutation) — and summarizes, defensively (each block wrapped so a missing/malformed field just skips that section rather than throwing): unpaid bills for the current billing period, household areas flagged or with unchecked items, groceries expiring within 7 days, per-vehicle overdue maintenance, and upcoming trips (within 21 days) with their unchecked prep/packing/departure count. If `window.STATE` isn't present for any reason, this returns `null` and the system prompt says so explicitly rather than silently guessing.
+
+**Proxy URL configuration.** The uploaded version required editing a hardcoded `const PROXY_URL` directly in the file. That was changed to `PROXY_URL_FALLBACK` (same placeholder default) plus a `resolveProxyUrl()` function that checks `window.STATE.settings.blueBonnetProxyUrl` first — which is now a real Settings field (Settings → "Blue Bonnet Assistant" card, `data-form="settings-bluebonnet"` → `saveBlueBonnetSettings()` in `app.js`, backed by `STATE.settings.blueBonnetProxyUrl` in `state.js`'s `defaultState()`). This matches how the Google Client ID is configured elsewhere in the app — no source editing required for normal setup, though editing `PROXY_URL_FALLBACK` directly still works for anyone who prefers that.
+
+**Board Mode interaction.** Since Board Mode (§ "Redesign" above) is meant to be a distraction-free kiosk display, the widget's injected stylesheet includes `body.board-mode-active #bb-bubble, body.board-mode-active #bb-panel { display: none !important; }`, and `render()` in `app.js` toggles `document.body.classList.toggle("board-mode-active", boardMode)` on every render — so the chat bubble disappears whenever Board Mode is active and reappears on exit, with no direct coupling between the two files beyond that one class name.
+
+**What was and wasn't changed from the uploaded file.** Renamed every user-visible/system-prompt string from "Organize It"/"ORGANIZE IT" to "Adulting"/"ADULTING" (the app's current name), renamed the internal `ORGANIZE_KB` constant to `ADULTING_KB`, corrected the header comment's setup instructions (the file actually lives in `organize-it/js/`, not `organize-it/`), and added the two integration hooks above (`window.STATE` exposure was already anticipated in the uploaded file's own header comment as an optional step; the Settings-based proxy URL and Board Mode hiding were added). The knowledge-base content itself, the visual design of the bubble/panel, and the Anthropic Messages API request shape were left untouched. The `blue-bonnet-worker.js` Cloudflare Worker proxy code itself was not part of what was uploaded to this project and is not included — the user needs their own copy (per the widget's setup comment, deployed separately per app so usage/billing stay isolated).
+
+**Onboarding + Calendar import (`js/app.js`: `renderOnboarding()`, `runCalendarImport()`, `detectMatches()`, `openImportReviewModal()`; `js/calendar.js`: `listAllEvents()`).** On first load (`STATE.settings.onboarded === false`), `renderOnboarding()` fills `#onboardingRoot` with a full-screen welcome card: short pitch, an inline Google Client ID field (only shown if one isn't already saved — there's no shared/hardcoded client ID, per the architecture decision in §8, so this step can't skip straight to a Google popup the very first time; the user still has to paste in their own Client ID once), a primary "Sign in with Google" button, and a "Skip for now" button. Skipping just sets `onboarded = true` and closes the overlay — everything else in the app works identically either way. `Calendar.listAllEvents(calendarId, timeMin, timeMax)` (new, read-only, unfiltered — unlike `listAdultingEvents` it does **not** filter by the private extended property, since the whole point is scanning events Adulting didn't create) fetches the user's real events. `detectMatches(title)` runs a lowercase substring match against `CALENDAR_IMPORT_RULES` in `data.js` (three keyword lists: `bill` → category/type guess, e.g. "rent"/"mortgage" → Rent/Mortgage/regular; `vehicle` → task title guess, e.g. "oil change"; `travel` → generic trip match, e.g. "trip to"/"flight to"/"hotel"). `runCalendarImport()` pulls events from 60 days ago (or `lastCalendarImportAt − 7 days` on subsequent runs, for incremental re-scans) through 365 days out, skips events already recorded in `STATE.settings.importedEventIds` or tagged as Adulting's own, de-duplicates by title within the batch and against existing bills/trips by name, and produces a `candidates` array. By default (`STATE.settings.autoImportCalendar === false`) it does **not** create anything automatically — it stashes the list in the UI-only `pendingImportCandidates` variable and toasts a count, reviewable via `openImportReviewModal()` (checkboxes per candidate, "Import selected" creates only the checked ones through `createFromImportCandidate()`). If the user opts in to "Import matches automatically" in Settings, `createFromImportCandidate()` runs on every match with no review step. Vehicle-task candidates always attach to `STATE.vehicles[0]` (the first/only vehicle) — there's no per-candidate vehicle picker in the review modal; with zero vehicles added yet, vehicle-kind candidates are silently dropped. This runs once on load (if a Client ID is already saved and a silent token refresh succeeds), immediately after a successful onboarding connect, and every 15 minutes on a `setInterval` while the tab stays open — approximating "ingest automatically and keep updating" while stopping short of writing data the user never actually confirmed by default, a deliberate scope decision (full read access to Gmail/Drive/Contacts was explicitly ruled out as out of scope for a static, backend-less app; only the Calendar scope already in use is read).
