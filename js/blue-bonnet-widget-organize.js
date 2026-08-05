@@ -14,7 +14,7 @@
    1. Proxy URL — point this at a Cloudflare Worker proxy that holds your
       Anthropic API key server-side (same pattern as blue-bonnet-worker.js
       used by the other apps). Use a SEPARATE worker from the broadcast-
-      crew and Campus 1 proxies so usage/billing stay isolated per app —
+      crew and Campus proxies so usage/billing stay isolated per app —
       copy blue-bonnet-worker.js, deploy it fresh, update its
       ALLOWED_ORIGIN to wherever this app is actually hosted. Once deployed,
       paste the Worker URL into Adulting's Settings tab -> "Blue Bonnet
@@ -28,8 +28,9 @@
       Bonnet still works fine as a pure expert-advice assistant.
    =========================================================== */
 
+(function () {
+  const PROXY_URL_FALLBACK = "PASTE_YOUR_ADULTING_WORKER_URL_HERE";
 
-const PROXY_URL_FALLBACK = "https://bluebonnetproxy.dustin12342986.workers.dev";
   // Reads the Worker proxy URL from Settings -> Blue Bonnet Assistant if the
   // user set one there (no source editing required); falls back to the
   // constant above for anyone who'd rather edit this file directly.
