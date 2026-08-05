@@ -28,7 +28,7 @@
       Bonnet still works fine as a pure expert-advice assistant.
    =========================================================== */
 
-(function () {
+
 const PROXY_URL_FALLBACK = "https://bluebonnetproxy.dustin12342986.workers.dev";
   // Reads the Worker proxy URL from Settings -> Blue Bonnet Assistant if the
   // user set one there (no source editing required); falls back to the
