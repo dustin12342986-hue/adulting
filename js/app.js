@@ -118,6 +118,29 @@ function toast(msg) {
   toast._t = setTimeout(() => { root.innerHTML = ""; }, 2600);
 }
 
+// ---------------------------------------------------------------------------
+// Encouragement bubbles — instant, local, no API call. Only ever fired on a
+// real positive (never for anything overdue/unfinished), rate-limited so
+// they feel noticed rather than spammy, and hidden entirely in Board Mode.
+// ---------------------------------------------------------------------------
+let lastPraiseAt = 0;
+function showPraise(category) {
+  if (STATE.settings.blueBonnetPraise === false) return;
+  if (boardMode) return;
+  const now = Date.now();
+  if (now - lastPraiseAt < 45000) return; // don't stack praise within 45s
+  lastPraiseAt = now;
+  const pool = (typeof PRAISE_PHRASES !== "undefined" && PRAISE_PHRASES[category]) || [];
+  if (!pool.length) return;
+  const msg = pool[Math.floor(Math.random() * pool.length)];
+  const root = $("#praiseRoot");
+  const el = document.createElement("div");
+  el.className = "praise-toast";
+  el.innerHTML = '<span class="sparkle">✨</span><span>' + escapeHtml(msg) + "</span>";
+  root.appendChild(el);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 4200);
+}
+
 function openModal(html) {
   $("#modalRoot").innerHTML = '<div class="modal-backdrop" data-action="close-modal-backdrop">' +
     '<div class="modal" role="dialog" aria-modal="true">' + html + "</div></div>";
@@ -464,11 +487,14 @@ function saveBillForm(form) {
 function deleteBill(id) { STATE.bills = STATE.bills.filter((b) => b.id !== id); persist(); }
 
 function togglePaid(id) {
-  const b = findById(STATE.bills, id);
   const key = currentBillingPeriodKey();
+  const wasAllPaid = STATE.bills.length > 0 && STATE.bills.every((b) => (b.paidPeriods || {})[key]);
+  const b = findById(STATE.bills, id);
   b.paidPeriods = b.paidPeriods || {};
   b.paidPeriods[key] = !b.paidPeriods[key];
+  const isAllPaidNow = STATE.bills.every((b2) => (b2.paidPeriods || {})[key]);
   persist();
+  if (isAllPaidNow && !wasAllPaid) showPraise("budget");
 }
 
 async function syncBillCalendar(id) {
@@ -563,9 +589,12 @@ function toggleAssetOpen(id) { expandedIds.has(id) ? expandedIds.delete(id) : ex
 
 function toggleAssetItem(id, index) {
   const a = findById(STATE.assets, id);
+  const wasDone = computeStatus(a.items) === "done";
   a.items[index].checked = !a.items[index].checked;
-  if (computeStatus(a.items) === "done") a.completedAt = new Date().toISOString();
+  const isDoneNow = computeStatus(a.items) === "done";
+  if (isDoneNow) a.completedAt = new Date().toISOString();
   persist();
+  if (isDoneNow && !wasDone) showPraise("household");
 }
 
 function addAssetItem(form) {
@@ -583,7 +612,7 @@ function removeAssetItem(id, index) {
   persist();
 }
 
-function setAssetSignalUp(id, val) { findById(STATE.assets, id).signalUp = val; persist(); }
+function setAssetSignalUp(id, val) { findById(STATE.assets, id).signalUp = val; persist(); if (val) showPraise("signalUp"); }
 function deleteAsset(id) { STATE.assets = STATE.assets.filter((a) => a.id !== id); persist(); }
 
 async function syncAssetCalendar(id) {
@@ -678,7 +707,13 @@ function addGroceryForm(form) {
   closeModal(); persist(); toast("Added " + data.name);
 }
 
-function markGroceryUsed(id) { findById(STATE.groceries, id).used = true; persist(); }
+function markGroceryUsed(id) {
+  const g = findById(STATE.groceries, id);
+  const usedBeforeExpiry = groceryStatus(g) !== "expired";
+  g.used = true;
+  persist();
+  if (usedBeforeExpiry) showPraise("grocery");
+}
 function markGroceryThrown(id) { findById(STATE.groceries, id).thrown = true; persist(); }
 function deleteGrocery(id) { STATE.groceries = STATE.groceries.filter((g) => g.id !== id); persist(); }
 
@@ -759,7 +794,7 @@ function completeVehicleTask(vehicleId, taskId) {
   if (t.intervalDays) t.dueDate = addDaysISO(todayISO(), t.intervalDays);
   if (t.intervalMiles) t.dueMileage = v.mileage + t.intervalMiles;
   persist();
-  toast(t.title + " marked done");
+  showPraise("vehicle");
 }
 
 function updateVehicleMileage(form) {
@@ -849,8 +884,11 @@ function toggleTripOpen(id) { expandedIds.has(id) ? expandedIds.delete(id) : exp
 
 function toggleTripItem(id, phase, index) {
   const t = findById(STATE.trips, id);
+  const wasDone = tripProgress(t).status === "done";
   t[phase][index].checked = !t[phase][index].checked;
+  const isDoneNow = tripProgress(t).status === "done";
   persist();
+  if (isDoneNow && !wasDone) showPraise("travel");
 }
 
 function deleteTrip(id) { STATE.trips = STATE.trips.filter((t) => t.id !== id); persist(); }
@@ -950,6 +988,9 @@ function renderSettings() {
     '<div class="card" style="max-width:560px;margin-bottom:20px"><h2>Blue Bonnet Assistant</h2>' +
     '<p class="small muted">The chat bubble in the corner is Blue Bonnet — an organizing assistant scoped to this app, with real advice for ADHD/autism-friendly systems. It runs through your own Cloudflare Worker proxy (so your Anthropic API key never sits in this file). It automatically hides while Board view is open.</p>' +
     '<form data-form="settings-bluebonnet"><div class="field"><label>Worker Proxy URL</label><input type="text" name="blueBonnetProxyUrl" value="' + escapeHtml(STATE.settings.blueBonnetProxyUrl || "") + '" placeholder="https://your-worker.your-subdomain.workers.dev" /></div>' +
+    '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="blueBonnetPraise" ' + (STATE.settings.blueBonnetPraise !== false ? "checked" : "") + ' style="width:18px;height:18px" /> Show little encouragement bubbles when you finish something</label>' +
+    '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="blueBonnetCheckins" ' + (STATE.settings.blueBonnetCheckins !== false ? "checked" : "") + ' style="width:18px;height:18px" /> Let Blue Bonnet check in on its own every few hours (only while connected; never forces the chat open, just leaves a quiet badge)</label>' +
+    '<div class="field" style="max-width:180px"><label>Check in every (hours)</label><input type="number" min="1" max="24" name="blueBonnetCheckinHours" value="' + (STATE.settings.blueBonnetCheckinHours || 3) + '" /></div>' +
     '<button type="submit" class="btn-sm">Save</button></form></div>' +
 
     '<div class="card" style="max-width:560px;margin-bottom:20px"><h2>Your data</h2>' +
@@ -963,7 +1004,11 @@ function renderSettings() {
 }
 
 function saveBlueBonnetSettings(form) {
-  STATE.settings.blueBonnetProxyUrl = collectFormData(form).blueBonnetProxyUrl || "";
+  const data = collectFormData(form);
+  STATE.settings.blueBonnetProxyUrl = data.blueBonnetProxyUrl || "";
+  STATE.settings.blueBonnetPraise = !!data.blueBonnetPraise;
+  STATE.settings.blueBonnetCheckins = !!data.blueBonnetCheckins;
+  STATE.settings.blueBonnetCheckinHours = Math.max(1, Number(data.blueBonnetCheckinHours) || 3);
   persist();
   toast("Saved");
 }

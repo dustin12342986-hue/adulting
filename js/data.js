@@ -204,6 +204,39 @@ const EMOJI_ICONS = {
   board: "🖥️", attention: "⚠️",
 };
 
+// ---- Encouragement bubbles --------------------------------------------------
+// Short, specific-feeling, non-generic lines shown right after a real
+// completion (never for anything overdue/unfinished — only positives).
+// Kept separate from Blue Bonnet's chat replies so they're instant, free,
+// and don't depend on the proxy being configured.
+const PRAISE_PHRASES = {
+  household: [
+    "That area's fully caught up. Nice.",
+    "Done is done — that one's off your plate.",
+    "Whole checklist cleared. That counts.",
+  ],
+  signalUp: [
+    "Good enough and called it — that's the whole point.",
+    "You said it's caught up. That's yours to decide.",
+  ],
+  budget: [
+    "Every bill marked paid this month. That's a real thing to have handled.",
+    "Budget's all caught up for this period.",
+  ],
+  vehicle: [
+    "One less thing your car needs from you right now.",
+    "Maintenance logged — that's taken care of.",
+  ],
+  grocery: [
+    "Used it before it went bad — nice timing.",
+    "That one didn't go to waste.",
+  ],
+  travel: [
+    "Fully packed. Nothing left on the list for this trip.",
+    "That trip's ready to go.",
+  ],
+};
+
 // ---- Calendar import: keyword heuristics -----------------------------------
 // Used to guess what an existing Google Calendar event probably represents,
 // so a first-time Google connect can suggest bills / vehicle tasks / trips to
@@ -241,6 +274,7 @@ if (typeof module !== "undefined") {
     DEFAULT_TRAVEL_TEMPLATE,
     MINIMAL_ICON_SVGS,
     EMOJI_ICONS,
+    PRAISE_PHRASES,
     CALENDAR_IMPORT_RULES,
   };
 }

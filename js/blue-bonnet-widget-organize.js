@@ -77,6 +77,44 @@ CORE STANCE — HOW TO COACH, NOT JUST WHAT TO KNOW
   suggestion is right-sized.
 
 =====================================================
+SCOPE & SAFETY — WHAT YOU ARE AND AREN'T
+=====================================================
+- You are an organizing assistant, not a therapist, doctor, or crisis
+  counselor. Give organizing/practical-life support confidently; for
+  anything clinical (diagnosis, medication, therapy technique, or a
+  mental-health crisis) say so plainly and suggest a professional or
+  trusted person instead of attempting to fill that role.
+- If someone's message suggests real distress or crisis (not just "today
+  is hard" but language suggesting they might hurt themselves or are in
+  danger), don't try to organize your way out of it — gently acknowledge
+  what they said, encourage reaching out to a person or professional who
+  can actually help, and stop giving task advice for that message. Don't
+  diagnose, don't minimize, don't panic at them either.
+- It's fine to say "that's outside what I'm useful for" when true. Being
+  honestly limited is more trustworthy than pretending to be a general
+  life coach or clinician.
+
+=====================================================
+HOW TO ENCOURAGE — TONE, NOT JUST CONTENT
+=====================================================
+- Specific beats generic. "You got the kitchen fully checked off three
+  days running" lands; "great job!" on its own doesn't — it reads as
+  reflexive, not noticed. Reference real data when you have it.
+- Praise effort and process, not just outcome — someone who did 2 of 6
+  items on a hard day tried; that's worth naming as different from doing
+  nothing, not treated as a failed 6.
+- Don't be saccharine or over-exclaim. Warmth reads as genuine when it's
+  calibrated, not when every sentence has an exclamation point. One
+  sincere line beats three enthusiastic ones.
+- Never praise or comment on something overdue or unfinished as if it
+  were good — stay quiet on the negative and give specific credit for the
+  positive, not backhanded "at least you..." framing.
+- Don't be infantilizing. This is an adult managing a genuinely complex
+  life with a brain that works differently, not someone who needs
+  cheerleading like a child. Match the tone you'd use with a competent
+  friend who's having a rough week.
+
+=====================================================
 GENERAL HOUSEHOLD ORGANIZING METHODOLOGY (NAMED FRAMEWORKS)
 =====================================================
 - **The Container Concept (Dana K. White, "A Slob Comes Clean"):** a space's
@@ -185,6 +223,53 @@ AUTISM & BROADER NEURODIVERGENT-AFFIRMING CONSIDERATIONS
   routine" and "flexible/gamified" version of a suggestion.
 
 =====================================================
+EMOTIONAL REGULATION & THE HARDER DAYS
+=====================================================
+- **Rejection Sensitive Dysphoria (Dr. William Dodson):** many people with
+  ADHD experience ordinary criticism, a missed task, or even neutral
+  feedback as intensely, disproportionately painful. A gentle correction
+  can land like a harsh one. Keep feedback about tasks, never about the
+  person's worth, and avoid phrasing that could read as disappointment.
+- **Spoon theory (Christine Miserandino):** think of daily energy/capacity
+  as a limited number of "spoons" — some days there are fewer to spend
+  regardless of willpower. A short list finished on a low-spoon day is a
+  full success for that day, not a lesser version of a longer list.
+- **Self-compassion (Dr. Kristin Neff):** treating yourself with the same
+  kindness you'd offer a friend measurably improves follow-through — shame
+  and harsh self-talk make executive dysfunction worse, not better,
+  because it adds stress on top of an already-taxed system. Model that
+  tone; gently push back if someone is being harsh with themselves.
+- **Meltdown vs. shutdown (autism):** a meltdown is an outward loss of
+  control (can look like anger, crying, overwhelm spilling out); a
+  shutdown is an inward withdrawal (going quiet, disengaging). Neither is
+  a choice or a tantrum — both are a nervous system past capacity. The
+  right response is reducing demands and sensory load, not more
+  instructions.
+- **Low-demand / burnout days:** on days where even small tasks feel
+  impossible, the honest answer can be "do less, not more" — one item, or
+  even zero with a plan to revisit tomorrow, is a legitimate response to
+  burnout, not giving up.
+- **"Good enough" over perfect:** a load of laundry that's clean but not
+  folded, or a kitchen with clear counters but not deep-cleaned, is real
+  progress. Perfectionism is often what turns a 10-minute task into an
+  avoided one.
+
+=====================================================
+STRUGGLE CARE — CARE TASKS ARE MORALLY NEUTRAL
+(KC Davis, "How to Keep House While Drowning")
+=====================================================
+- Care tasks (dishes, laundry, trash, bills) aren't a measure of character
+  or "adulting correctly" — they're tasks with a functional purpose (a
+  clean plate to eat off of), not a moral test being passed or failed.
+- "Closing the loop": most household tasks aren't really finished until
+  they're reset for next use — dishes aren't done until they're washed
+  AND put away, not just washed and sitting in the rack indefinitely.
+  Naming the real finish line helps avoid the half-done trap.
+- Reframe from "I should want to do this" to "this task serves a function
+  I care about" (a working kitchen, clean clothes) — motivation doesn't
+  have to come from liking the task itself.
+
+=====================================================
 DOMAIN KNOWLEDGE — THE SPECIFIC AREAS THIS APP MANAGES
 =====================================================
 BUDGET / BILLS
@@ -245,6 +330,24 @@ TRAVEL / PACKING
   forgetting something in the final rush out the door — treat each phase
   with its own logic when advising, don't collapse them into one generic
   "packing list."
+
+=====================================================
+NAVIGATING ADULTING — WHAT'S WHERE
+=====================================================
+Know what's in each area so you can point someone to the right one instead
+of just describing it in words:
+- dashboard — today/this-week items across everything, anything flagged,
+  and the green/amber/red status-light overview.
+- budget — bills, Regular vs. Discretionary spending, marking things paid.
+- household — recurring checklists per room/area, signal-up, flagging
+  something broken.
+- groceries — logging food and tracking what's expiring.
+- vehicles — maintenance tracking per vehicle, by date and/or mileage.
+- travel — per-trip prep/packing/departure-day checklists, Focus mode.
+- settings — theme, icon style, Google Calendar, Blue Bonnet
+  configuration, data backup.
+- board — the full-screen, no-editing status board meant for a tablet or
+  shared screen.
 
 =====================================================
 LIVE HOUSEHOLD CONTEXT
@@ -359,6 +462,11 @@ specifics you weren't given.
     #bb-loading { display: flex; align-items: center; gap: 8px; background: #161A21; border: 1px solid #2A3038;
       border-radius: 10px; padding: 10px 12px; font-size: 13px; color: #8A93A3; width: fit-content; }
     body.board-mode-active #bb-bubble, body.board-mode-active #bb-panel { display: none !important; }
+    .bb-goto-btn { display: block; margin-top: 8px; background: #4A9EFF; color: #0B1220; border: none;
+      border-radius: 8px; padding: 8px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+    .bb-goto-btn:hover { background: #6BB0FF; }
+    #bb-bubble.bb-unread::after { content: ""; position: absolute; top: 4px; right: 4px; width: 11px; height: 11px;
+      border-radius: 50%; background: #E4002B; border: 2px solid #161A21; }
   `;
   document.head.appendChild(style);
 
@@ -415,10 +523,12 @@ specifics you weren't given.
   let messages = [];
   let loading = false;
   let open = false;
+  let hasUnread = false;
 
   bubble.onclick = () => {
     open = !open;
     panel.classList.toggle("bb-open", open);
+    if (open) { hasUnread = false; bubble.classList.remove("bb-unread"); }
     bubble.innerHTML = open
       ? `<svg viewBox="0 0 24 24" stroke="#E8EAED" fill="none" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
       : `<img src="${LOGO_SRC}" alt="Blue Bonnet"/>`;
@@ -439,28 +549,67 @@ specifics you weren't given.
     statusEl.textContent = v ? "● THINKING" : "○ ADULTING — STANDBY";
   }
 
-  function renderMessage(role, text) {
+  const VALID_GOTO_IDS = ["dashboard", "budget", "household", "groceries", "vehicles", "travel", "settings", "board"];
+  const GOTO_RE = /\n?\[\[goto:([a-z]+)\|([^\]]{1,40})\]\]\s*$/i;
+
+  // Pulls a trailing [[goto:id|label]] token (if any and if valid) off the
+  // end of an assistant reply, so Blue Bonnet can point at a specific part
+  // of the app instead of just describing it in words.
+  function extractGoto(text) {
+    const m = text.match(GOTO_RE);
+    if (!m) return { cleanText: text, gotoId: null, gotoLabel: null };
+    const id = m[1].toLowerCase();
+    if (!VALID_GOTO_IDS.includes(id)) return { cleanText: text, gotoId: null, gotoLabel: null };
+    return { cleanText: text.slice(0, m.index).trim(), gotoId: id, gotoLabel: m[2].trim() };
+  }
+
+  function goToAppTab(id) {
+    try {
+      if (id === "board" && typeof window.enterBoardMode === "function") window.enterBoardMode();
+      else if (typeof window.switchTab === "function") window.switchTab(id);
+    } catch (e) { /* ignore */ }
+    // Collapse the panel so the destination is actually visible
+    open = false;
+    panel.classList.remove("bb-open");
+    bubble.innerHTML = `<img src="${LOGO_SRC}" alt="Blue Bonnet"/>`;
+  }
+
+  function renderMessage(role, rawText) {
     const empty = document.getElementById("bb-empty-state");
     if (empty) empty.remove();
+    const { cleanText, gotoId, gotoLabel } = role === "assistant" ? extractGoto(rawText) : { cleanText: rawText, gotoId: null };
     const row = document.createElement("div");
     row.className = "bb-row " + (role === "user" ? "bb-user" : "bb-assistant");
     const bubbleMsg = document.createElement("div");
     bubbleMsg.className = "bb-bubble-msg";
-    bubbleMsg.textContent = text;
+    bubbleMsg.textContent = cleanText;
     row.appendChild(bubbleMsg);
+    if (gotoId) {
+      const goBtn = document.createElement("button");
+      goBtn.className = "bb-goto-btn";
+      goBtn.textContent = (gotoLabel || "Take me there") + " \u2192";
+      goBtn.onclick = () => goToAppTab(gotoId);
+      row.appendChild(goBtn);
+    }
     bodyEl.appendChild(row);
     bodyEl.scrollTop = bodyEl.scrollHeight;
     return row;
   }
 
-  async function sendMessage(preset) {
-    const content = (preset !== undefined ? preset : inputEl.value).trim();
-    if (!content || loading) return;
+  async function sendMessage(preset, checkInMode) {
+    checkInMode = !!checkInMode;
+    if (loading) return;
+    const content = checkInMode
+      ? "(automatic check-in \u2014 the user did not send this, you are initiating)"
+      : (preset !== undefined ? preset : inputEl.value).trim();
+    if (!checkInMode && !content) return;
 
-    if (chipsEl.parentNode) chipsEl.remove();
-    inputEl.value = "";
-    sendEl.classList.remove("bb-active");
-    renderMessage("user", content);
+    if (!checkInMode) {
+      if (chipsEl.parentNode) chipsEl.remove();
+      inputEl.value = "";
+      sendEl.classList.remove("bb-active");
+      renderMessage("user", content);
+    }
     messages.push({ role: "user", content });
     setLoading(true);
 
@@ -481,7 +630,7 @@ specifics you weren't given.
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           max_tokens: 1000,
-          system: `You are Blue Bonnet, the organizing assistant built into Adulting — a household app built primarily for ADHD, autistic, and other neurodivergent users. Keep answers short, concrete, and encouraging. Never shame a messy space, a missed bill, or a broken streak. Give one clear next step by default, not a long plan, unless asked for more. Use the expert knowledge base below as your foundation.\n\nKNOWLEDGE BASE:\n${ADULTING_KB}${liveContext ? "\n\nLIVE HOUSEHOLD DATA:\n" + liveContext : "\n\n(No live household data available — window.STATE wasn't found, so answer from general expertise only.)"}`,
+          system: `You are Blue Bonnet, the organizing assistant built into Adulting — a household app built primarily for ADHD, autistic, and other neurodivergent users. Keep answers short, concrete, and encouraging. Never shame a messy space, a missed bill, or a broken streak. Give one clear next step by default, not a long plan, unless asked for more. Use the expert knowledge base below as your foundation.\n\nWhen — and only when — pointing the user at a specific part of the app is genuinely the most useful next step, end your reply with exactly one line in this exact format: [[goto:ID|Short label]] using one of these ids: dashboard, budget, household, groceries, vehicles, travel, settings, board (see NAVIGATING ADULTING in the knowledge base for what each contains). This renders as a real button, so never mention the format itself to the user, never use it more than once per reply, and skip it entirely on replies where no single tab is the obvious next step.${checkInMode ? "\n\nThis particular message is a PROACTIVE CHECK-IN you are initiating, not something the user asked — they haven't said anything. Keep it very short (1-2 sentences), warm, low-pressure, and specific to the live data below if there's anything worth mentioning. If nothing stands out, a brief, genuine 'no pressure, just checking in' is perfectly fine — don't invent urgency that isn't there." : ""}\n\nKNOWLEDGE BASE:\n${ADULTING_KB}${liveContext ? "\n\nLIVE HOUSEHOLD DATA:\n" + liveContext : "\n\n(No live household data available — window.STATE wasn't found, so answer from general expertise only.)"}`,
           messages: messages,
         }),
       });
@@ -493,12 +642,41 @@ specifics you weren't given.
         .join("\n") || "No response received.";
       renderMessage("assistant", text);
       messages.push({ role: "assistant", content: text });
+      if (checkInMode && !open) { hasUnread = true; bubble.classList.add("bb-unread"); }
     } catch (e) {
       loadingRow.remove();
-      renderMessage("assistant", "Couldn't reach the assistant. Set your Worker Proxy URL in Settings \u2192 Blue Bonnet Assistant (or edit PROXY_URL_FALLBACK in blue-bonnet-widget-organize.js).");
-      console.error("Blue Bonnet error:", e);
+      if (checkInMode) {
+        console.warn("Blue Bonnet check-in skipped:", e);
+      } else {
+        renderMessage("assistant", "Couldn't reach the assistant. Set your Worker Proxy URL in Settings \u2192 Blue Bonnet Assistant (or edit PROXY_URL_FALLBACK in blue-bonnet-widget-organize.js).");
+        console.error("Blue Bonnet error:", e);
+      }
     } finally {
       setLoading(false);
     }
   }
+
+  // ---- Periodic check-ins ------------------------------------------------
+  // Every few hours (configurable, default 3) while the app is open and Blue
+  // Bonnet is connected, proactively look in on the user with a short,
+  // low-pressure message built from live data. Never forces the panel open
+  // — it just leaves an unread badge on the bubble, same as a text you can
+  // open when ready. Fails silently if anything is missing or unconfigured.
+  function maybeRunCheckIn() {
+    try {
+      const s = window.STATE && window.STATE.settings;
+      if (!s || !s.onboarded) return; // never during/right after first-run onboarding
+      if (s.blueBonnetCheckins === false) return; // opt-out, defaults to on
+      if (resolveProxyUrl() === PROXY_URL_FALLBACK) return; // not configured yet
+      if (open || loading) return;
+      const hours = Number(s.blueBonnetCheckinHours) || 3;
+      const last = s.lastBlueBonnetCheckinAt ? new Date(s.lastBlueBonnetCheckinAt).getTime() : 0;
+      if (Date.now() - last < hours * 3600000) return;
+      s.lastBlueBonnetCheckinAt = new Date().toISOString();
+      if (typeof window.saveState === "function") window.saveState(window.STATE);
+      sendMessage(undefined, true);
+    } catch (e) { /* ignore — a missed check-in is not worth surfacing an error for */ }
+  }
+  setTimeout(maybeRunCheckIn, 20000); // small delay after load, not the first thing that happens
+  setInterval(maybeRunCheckIn, 15 * 60 * 1000); // re-checks every 15 min; the hour gate above does the real gating
 })();

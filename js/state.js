@@ -147,6 +147,8 @@ function defaultState() {
       theme: "sunset", customHue: 18, iconStyle: "colorful",
       onboarded: false, autoImportCalendar: false, importedEventIds: [], lastCalendarImportAt: null,
       blueBonnetProxyUrl: "",
+      blueBonnetCheckins: true, blueBonnetCheckinHours: 3, lastBlueBonnetCheckinAt: null,
+      blueBonnetPraise: true,
     },
     bills: [],
     assets: [],

@@ -72,6 +72,13 @@ It runs through your own Cloudflare Worker proxy so your Anthropic API key never
 
 Once connected, Blue Bonnet also reads your live household data (`window.STATE`, kept in sync automatically) — so it can answer things like "what's overdue" or "what's expiring soon" specifically, not just in general.
 
+Its knowledge base goes beyond generic organizing tips — named frameworks (GTD, KonMari, FlyLady, Struggle Care, the ADHD-specific "ADD-Friendly Ways to Organize Your Life"), ADHD/autism executive-function science, and emotional-regulation grounding (rejection sensitive dysphoria, spoon theory, self-compassion, meltdown vs. shutdown) — with an explicit boundary that it's an organizing assistant, not a therapist, and will say so if a conversation goes somewhere clinical.
+
+A few things it can do beyond plain chat, all in Settings → Blue Bonnet Assistant:
+- **Guide you to the right tab.** When relevant, its replies include a real button that jumps you straight to the part of the app it's talking about (e.g. "Check groceries →").
+- **Encouragement bubbles.** A small, specific, non-generic note appears near the chat bubble when you finish something for real (a checklist fully done, all bills paid this month, a vehicle task logged, food used before it expired, a trip fully packed) — never for anything overdue or unfinished. Toggle it off if it's not for you.
+- **Periodic check-ins.** Every few hours (default 3, adjustable) while the app is open and connected, it quietly checks in with something short and specific to what's going on — never forcing the chat open, just a small badge on the bubble. Toggle it off anytime.
+
 ## Backing up your data
 
 Settings → **Export backup (.json)** downloads everything. **Import backup** restores it (on this device or a new one). There's no cloud account and no server — the exported file *is* your backup, so keep a copy somewhere safe if the data matters.
