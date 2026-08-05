@@ -76,8 +76,13 @@ Its knowledge base goes beyond generic organizing tips — named frameworks (GTD
 
 A few things it can do beyond plain chat, all in Settings → Blue Bonnet Assistant:
 - **Guide you to the right tab.** When relevant, its replies include a real button that jumps you straight to the part of the app it's talking about (e.g. "Check groceries →").
+- **Actually do things, when you ask.** Say "add a $65 internet bill due the 12th" or "mark the kitchen checklist done" and it will make the change for real, then confirm in plain language — you'll see a small ✓ note in the chat for each thing it did. It only asks for missing details rather than guessing, and it's deliberately limited to adding and completing things — it never deletes or resets anything; those stay manual, on-purpose actions in the UI. This requires the Cloudflare Worker proxy to forward `tools` to Anthropic — see the Worker setup note below if tool actions aren't working.
 - **Encouragement bubbles.** A small, specific, non-generic note appears near the chat bubble when you finish something for real (a checklist fully done, all bills paid this month, a vehicle task logged, food used before it expired, a trip fully packed) — never for anything overdue or unfinished. Toggle it off if it's not for you.
 - **Periodic check-ins.** Every few hours (default 3, adjustable) while the app is open and connected, it quietly checks in with something short and specific to what's going on — never forcing the chat open, just a small badge on the bubble. Toggle it off anytime.
+
+## Notifications
+
+Settings → **Notifications** → **Enable notifications** turns on real OS popup notifications for encouragement bubbles and Blue Bonnet check-ins, but only while a tab with Adulting open is somewhere on your device (even minimized or behind another window) — closing the tab/browser stops them, since this app has no background server to send them otherwise. Your browser will ask you to allow notifications the first time; if you say no, you can change your mind later in your browser's own site settings.
 
 ## Backing up your data
 

@@ -29,7 +29,8 @@
    =========================================================== */
 
 (function () {
-  const PROXY_URL_FALLBACK = const PROXY_URL_FALLBACK = "https://bluebonnetproxy.dustin12342986.workers.dev";
+  const PROXY_URL_FALLBACK = "PASTE_YOUR_ADULTING_WORKER_URL_HERE";
+
   // Reads the Worker proxy URL from Settings -> Blue Bonnet Assistant if the
   // user set one there (no source editing required); falls back to the
   // constant above for anyone who'd rather edit this file directly.
@@ -366,6 +367,88 @@ specifics you weren't given.
     "Is this food still good to eat?",
   ];
 
+  // ---- Tool use: lets Blue Bonnet actually do things in the app ----------
+  // Every tool maps 1:1 to a method on window.AdultingActions (app.js),
+  // which is deliberately additive/completion-only — nothing destructive
+  // is exposed here, by design. Tools are omitted entirely during proactive
+  // check-ins (see sendMessage) so Blue Bonnet never acts unprompted.
+  const TOOLS = [
+    { name: "add_bill", description: "Add a new bill/budget line item.", input_schema: { type: "object", properties: {
+      name: { type: "string" }, amount: { type: "number" }, dueDay: { type: "integer", description: "Day of month, 1-31" },
+      type: { type: "string", enum: ["regular", "discretionary"] }, category: { type: "string" }, recurring: { type: "boolean" },
+    }, required: ["name", "amount"] } },
+    { name: "mark_bill_paid", description: "Mark a bill as paid for the current billing period.", input_schema: { type: "object", properties: {
+      billName: { type: "string" },
+    }, required: ["billName"] } },
+    { name: "add_household_area", description: "Add a new household area/room with a checklist. templateKey can be one of: kitchen, bathroom, livingroom, bedroom, laundry, hvac, safety, yard (uses that area's standard checklist); omit for a blank custom area (optionally provide items).", input_schema: { type: "object", properties: {
+      name: { type: "string" }, templateKey: { type: "string" }, recurrence: { type: "string", enum: ["weekly", "monthly"] },
+      items: { type: "array", items: { type: "string" } },
+    }, required: ["name"] } },
+    { name: "check_household_item", description: "Check off one checklist item in a household area.", input_schema: { type: "object", properties: {
+      areaName: { type: "string" }, itemText: { type: "string", description: "Text (or partial text) of the checklist item" },
+    }, required: ["areaName", "itemText"] } },
+    { name: "signal_area_caught_up", description: "Mark a household area as fully caught up (the 'signal up' toggle), separate from the checklist itself.", input_schema: { type: "object", properties: {
+      areaName: { type: "string" },
+    }, required: ["areaName"] } },
+    { name: "flag_needs_attention", description: "Flag a household area, a vehicle's maintenance task, or a trip as needing attention, with a note.", input_schema: { type: "object", properties: {
+      domain: { type: "string", enum: ["household", "vehicle", "trip"] }, name: { type: "string", description: "Area name, vehicle name, or trip name" },
+      taskName: { type: "string", description: "Only for domain=vehicle: which maintenance task" }, note: { type: "string" },
+    }, required: ["domain", "name", "note"] } },
+    { name: "add_grocery", description: "Log a grocery item that was bought.", input_schema: { type: "object", properties: {
+      name: { type: "string" }, qty: { type: "integer" }, purchaseDate: { type: "string", description: "YYYY-MM-DD, defaults to today" },
+      expirationDate: { type: "string", description: "YYYY-MM-DD; omit to auto-suggest from typical shelf life" },
+    }, required: ["name"] } },
+    { name: "mark_grocery_used", description: "Mark a grocery item as used.", input_schema: { type: "object", properties: {
+      name: { type: "string" },
+    }, required: ["name"] } },
+    { name: "mark_grocery_thrown", description: "Mark a grocery item as thrown out/expired.", input_schema: { type: "object", properties: {
+      name: { type: "string" },
+    }, required: ["name"] } },
+    { name: "add_vehicle", description: "Add a new vehicle with the standard default maintenance tasks.", input_schema: { type: "object", properties: {
+      name: { type: "string" }, year: { type: "string" }, make: { type: "string" }, model: { type: "string" }, mileage: { type: "number" },
+    }, required: ["name"] } },
+    { name: "complete_vehicle_task", description: "Mark a vehicle maintenance task as done today, recalculating its next due date/mileage.", input_schema: { type: "object", properties: {
+      vehicleName: { type: "string" }, taskTitle: { type: "string" },
+    }, required: ["vehicleName", "taskTitle"] } },
+    { name: "update_vehicle_mileage", description: "Update a vehicle's current mileage.", input_schema: { type: "object", properties: {
+      vehicleName: { type: "string" }, mileage: { type: "number" },
+    }, required: ["vehicleName", "mileage"] } },
+    { name: "add_trip", description: "Create a new trip with a full prep/packing/departure-day checklist.", input_schema: { type: "object", properties: {
+      name: { type: "string" }, destination: { type: "string" }, startDate: { type: "string", description: "YYYY-MM-DD" }, endDate: { type: "string", description: "YYYY-MM-DD" },
+    }, required: ["name", "startDate"] } },
+    { name: "check_trip_item", description: "Check off one item on a trip's prep, packing, or departure-day list.", input_schema: { type: "object", properties: {
+      tripName: { type: "string" }, phase: { type: "string", enum: ["prep", "packing", "departureDay"] }, itemText: { type: "string" },
+    }, required: ["tripName", "itemText"] } },
+  ];
+
+  const TOOL_HANDLERS = {
+    add_bill: (i) => window.AdultingActions.addBill(i),
+    mark_bill_paid: (i) => window.AdultingActions.markBillPaid(i),
+    add_household_area: (i) => window.AdultingActions.addHouseholdArea(i),
+    check_household_item: (i) => window.AdultingActions.checkHouseholdItem(i),
+    signal_area_caught_up: (i) => window.AdultingActions.signalAreaCaughtUp(i),
+    flag_needs_attention: (i) => window.AdultingActions.flagNeedsAttention(i),
+    add_grocery: (i) => window.AdultingActions.addGrocery(i),
+    mark_grocery_used: (i) => window.AdultingActions.markGroceryUsed(i),
+    mark_grocery_thrown: (i) => window.AdultingActions.markGroceryThrown(i),
+    add_vehicle: (i) => window.AdultingActions.addVehicle(i),
+    complete_vehicle_task: (i) => window.AdultingActions.completeVehicleTaskByName(i),
+    update_vehicle_mileage: (i) => window.AdultingActions.updateVehicleMileage(i),
+    add_trip: (i) => window.AdultingActions.addTrip(i),
+    check_trip_item: (i) => window.AdultingActions.checkTripItem(i),
+  };
+
+  function callTool(name, input) {
+    if (!window.AdultingActions) return { ok: false, message: "The app isn't ready to make changes right now." };
+    const handler = TOOL_HANDLERS[name];
+    if (!handler) return { ok: false, message: "Unknown action: " + name };
+    try {
+      return handler(input || {});
+    } catch (err) {
+      return { ok: false, message: "That didn't work: " + err.message };
+    }
+  }
+
   // ---- Live household context (optional, graceful if unavailable) ----
   function buildLiveContext() {
     const s = window.STATE;
@@ -464,6 +547,9 @@ specifics you weren't given.
     .bb-goto-btn { display: block; margin-top: 8px; background: #4A9EFF; color: #0B1220; border: none;
       border-radius: 8px; padding: 8px 12px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
     .bb-goto-btn:hover { background: #6BB0FF; }
+    .bb-action-note { font-size: 12px; color: #8A93A3; background: #1B2027; border: 1px dashed #2A3038;
+      border-radius: 8px; padding: 6px 10px; margin: 2px 0 10px; }
+    .bb-action-note.bb-action-note-fail { color: #E4A85A; border-color: #4a3a1f; }
     #bb-bubble.bb-unread::after { content: ""; position: absolute; top: 4px; right: 4px; width: 11px; height: 11px;
       border-radius: 50%; background: #E4002B; border: 2px solid #161A21; }
   `;
@@ -595,6 +681,17 @@ specifics you weren't given.
     return row;
   }
 
+  // A small inline confirmation line for a tool action Blue Bonnet actually
+  // performed — separate from its conversational reply, so what changed is
+  // never buried in prose.
+  function renderActionNote(message, ok) {
+    const el = document.createElement("div");
+    el.className = "bb-action-note" + (ok ? "" : " bb-action-note-fail");
+    el.textContent = (ok ? "\u2713 " : "\u26a0 ") + message;
+    bodyEl.appendChild(el);
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+
   async function sendMessage(preset, checkInMode) {
     checkInMode = !!checkInMode;
     if (loading) return;
@@ -624,24 +721,46 @@ specifics you weren't given.
         throw new Error("Proxy URL not configured yet");
       }
       const liveContext = buildLiveContext();
-      const res = await fetch(proxyUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          max_tokens: 1000,
-          system: `You are Blue Bonnet, the organizing assistant built into Adulting — a household app built primarily for ADHD, autistic, and other neurodivergent users. Keep answers short, concrete, and encouraging. Never shame a messy space, a missed bill, or a broken streak. Give one clear next step by default, not a long plan, unless asked for more. Use the expert knowledge base below as your foundation.\n\nWhen — and only when — pointing the user at a specific part of the app is genuinely the most useful next step, end your reply with exactly one line in this exact format: [[goto:ID|Short label]] using one of these ids: dashboard, budget, household, groceries, vehicles, travel, settings, board (see NAVIGATING ADULTING in the knowledge base for what each contains). This renders as a real button, so never mention the format itself to the user, never use it more than once per reply, and skip it entirely on replies where no single tab is the obvious next step.${checkInMode ? "\n\nThis particular message is a PROACTIVE CHECK-IN you are initiating, not something the user asked — they haven't said anything. Keep it very short (1-2 sentences), warm, low-pressure, and specific to the live data below if there's anything worth mentioning. If nothing stands out, a brief, genuine 'no pressure, just checking in' is perfectly fine — don't invent urgency that isn't there." : ""}\n\nKNOWLEDGE BASE:\n${ADULTING_KB}${liveContext ? "\n\nLIVE HOUSEHOLD DATA:\n" + liveContext : "\n\n(No live household data available — window.STATE wasn't found, so answer from general expertise only.)"}`,
-          messages: messages,
-        }),
-      });
-      const data = await res.json();
+      const systemPrompt = `You are Blue Bonnet, the organizing assistant built into Adulting — a household app built primarily for ADHD, autistic, and other neurodivergent users. Keep answers short, concrete, and encouraging. Never shame a messy space, a missed bill, or a broken streak. Give one clear next step by default, not a long plan, unless asked for more. Use the expert knowledge base below as your foundation.\n\nWhen — and only when — pointing the user at a specific part of the app is genuinely the most useful next step, end your reply with exactly one line in this exact format: [[goto:ID|Short label]] using one of these ids: dashboard, budget, household, groceries, vehicles, travel, settings, board (see NAVIGATING ADULTING in the knowledge base for what each contains). This renders as a real button, so never mention the format itself to the user, never use it more than once per reply, and skip it entirely on replies where no single tab is the obvious next step.${checkInMode ? "\n\nThis particular message is a PROACTIVE CHECK-IN you are initiating, not something the user asked — they haven't said anything. Keep it very short (1-2 sentences), warm, low-pressure, and specific to the live data below if there's anything worth mentioning. If nothing stands out, a brief, genuine 'no pressure, just checking in' is perfectly fine — don't invent urgency that isn't there. Do not use any tools during a check-in — notice and mention things, don't act on them unasked." : "\n\nYou also have tools to actually perform actions in the app when the user clearly wants something done, not just discussed (add a bill, check off a chore, log groceries, mark maintenance done, create a trip, etc.). Ask for missing required details rather than guessing — never invent an amount, date, or name. After a tool call, confirm briefly in your own words; don't repeat raw data back. Don't chain more than 2-3 tool calls in a row without pausing to summarize what you did."}\n\nKNOWLEDGE BASE:\n${ADULTING_KB}${liveContext ? "\n\nLIVE HOUSEHOLD DATA:\n" + liveContext : "\n\n(No live household data available — window.STATE wasn't found, so answer from general expertise only.)"}`;
+
+      let finalText = "";
+      const MAX_ROUNDS = 4;
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const res = await fetch(proxyUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.assign(
+            { max_tokens: 1000, system: systemPrompt, messages: messages },
+            checkInMode ? {} : { tools: TOOLS }
+          )),
+        });
+        const data = await res.json();
+        if (data && data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        const contentBlocks = data.content || [];
+        messages.push({ role: "assistant", content: contentBlocks });
+
+        const textNow = contentBlocks.filter((b) => b.type === "text").map((b) => b.text).join("\n");
+        if (textNow) finalText = textNow;
+        const toolBlocks = contentBlocks.filter((b) => b.type === "tool_use");
+
+        if (!toolBlocks.length) break;
+
+        loadingRow.querySelector("#bb-loading").textContent = "doing that now...";
+        const resultBlocks = toolBlocks.map((tb) => {
+          const result = callTool(tb.name, tb.input);
+          renderActionNote(result.message, result.ok);
+          return { type: "tool_result", tool_use_id: tb.id, content: JSON.stringify(result) };
+        });
+        messages.push({ role: "user", content: resultBlocks });
+        loadingRow.querySelector("#bb-loading").textContent = "thinking it through...";
+      }
+
       loadingRow.remove();
-      const text = (data.content || [])
-        .filter((b) => b.type === "text")
-        .map((b) => b.text)
-        .join("\n") || "No response received.";
-      renderMessage("assistant", text);
-      messages.push({ role: "assistant", content: text });
-      if (checkInMode && !open) { hasUnread = true; bubble.classList.add("bb-unread"); }
+      if (finalText) {
+        renderMessage("assistant", finalText);
+      }
+      if (checkInMode && !open && finalText) { hasUnread = true; bubble.classList.add("bb-unread"); }
+      if (checkInMode && finalText && window.showNotification) window.showNotification("Blue Bonnet check-in", finalText);
     } catch (e) {
       loadingRow.remove();
       if (checkInMode) {

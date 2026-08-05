@@ -149,6 +149,7 @@ function defaultState() {
       blueBonnetProxyUrl: "",
       blueBonnetCheckins: true, blueBonnetCheckinHours: 3, lastBlueBonnetCheckinAt: null,
       blueBonnetPraise: true,
+      notificationsEnabled: false,
     },
     bills: [],
     assets: [],

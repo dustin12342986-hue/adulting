@@ -61,6 +61,19 @@ Data lives in the browser's local storage per *origin* — `localhost:8000` and 
 - Try the Board view button.
 - Try Blue Bonnet (bottom-right bubble), if configured.
 
+## 8. Let Blue Bonnet actually take actions (one-time Worker update)
+
+Blue Bonnet can now do things in the app when you ask it to in chat (add a bill, check off a chore, log groceries, etc.), not just talk. This needs one small update to your Cloudflare Worker so it forwards that capability through to Anthropic — your current Worker silently drops it otherwise.
+
+1. Open **`cloudflare-worker.js`** in this folder.
+2. Set `ALLOWED_ORIGIN` near the top to your live site's origin (same value you already used for this — e.g. `https://your-username.github.io`).
+3. Go to your Cloudflare dashboard → **Workers & Pages** → your worker → **Edit code**.
+4. Select all the existing code and replace it with the full contents of `cloudflare-worker.js`.
+5. Click **Deploy**.
+6. Your `ANTHROPIC_API_KEY` secret is unaffected by this — it's already set from before and doesn't need to be re-entered.
+
+Nothing changes in Adulting's Settings for this step — the Worker's URL stays the same.
+
 ## Updating the app later
 
 Any time you edit a file locally, go back to the repo on GitHub, open that file, click the pencil (edit) icon, paste in the new content, and commit — GitHub Pages rebuilds automatically within about a minute. For frequent changes, using `git` from the command line is faster, but the web UI works fine for occasional edits.

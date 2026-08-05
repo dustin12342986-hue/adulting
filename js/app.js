@@ -139,6 +139,49 @@ function showPraise(category) {
   el.innerHTML = '<span class="sparkle">✨</span><span>' + escapeHtml(msg) + "</span>";
   root.appendChild(el);
   setTimeout(() => { if (el.parentNode) el.remove(); }, 4200);
+  showNotification("Nice work", msg);
+}
+
+// ---------------------------------------------------------------------------
+// Browser notifications — lightweight, tab-must-be-open version (no service
+// worker / push backend). Only ever fires for a real positive (praise) or a
+// Blue Bonnet check-in, and only when this tab isn't the visible/focused one,
+// so it doesn't double up with the on-screen praise bubble or chat message.
+// ---------------------------------------------------------------------------
+function showNotification(title, body) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  if (STATE.settings.notificationsEnabled === false) return;
+  if (typeof document !== "undefined" && !document.hidden) return;
+  try {
+    const n = new Notification(title, { body: body, tag: "adulting-" + title.toLowerCase().replace(/[^a-z0-9]+/g, "-") });
+    n.onclick = () => { window.focus(); n.close(); };
+  } catch (e) {
+    console.warn("Notification failed:", e);
+  }
+}
+window.showNotification = showNotification;
+
+function enableNotifications() {
+  if (typeof Notification === "undefined") {
+    toast("Notifications aren't supported in this browser.");
+    return;
+  }
+  if (Notification.permission === "granted") {
+    STATE.settings.notificationsEnabled = true;
+    persist();
+    toast("Notifications are already on.");
+    return;
+  }
+  if (Notification.permission === "denied") {
+    toast("Notifications are blocked — allow them in your browser's site settings.");
+    return;
+  }
+  Notification.requestPermission().then((perm) => {
+    STATE.settings.notificationsEnabled = perm === "granted";
+    persist();
+    toast(perm === "granted" ? "Notifications enabled" : "No worries — you can turn this on later.");
+  });
 }
 
 function openModal(html) {
@@ -993,6 +1036,15 @@ function renderSettings() {
     '<div class="field" style="max-width:180px"><label>Check in every (hours)</label><input type="number" min="1" max="24" name="blueBonnetCheckinHours" value="' + (STATE.settings.blueBonnetCheckinHours || 3) + '" /></div>' +
     '<button type="submit" class="btn-sm">Save</button></form></div>' +
 
+    '<div class="card" style="max-width:560px;margin-bottom:20px"><h2>Notifications</h2>' +
+    '<p class="small muted">Real popup notifications for encouragement bubbles and Blue Bonnet check-ins — but only while this tab is open somewhere (even minimized or behind another window). Closing the tab or browser stops them; this app has no background server to send them otherwise.</p>' +
+    '<div class="row" style="align-items:center;gap:10px">' +
+    (typeof Notification === "undefined" ? '<span class="status-pill none">Not supported in this browser</span>' :
+      Notification.permission === "granted" ? '<span class="status-pill done">Enabled</span>' :
+      Notification.permission === "denied" ? '<span class="status-pill none">Blocked — allow in your browser\'s site settings</span>' :
+      '<button class="btn-sm btn-primary" data-action="enable-notifications">Enable notifications</button>') +
+    "</div></div>" +
+
     '<div class="card" style="max-width:560px;margin-bottom:20px"><h2>Your data</h2>' +
     '<p class="small muted">Everything is stored locally in this browser. Back it up or move it to another device with export/import.</p>' +
     '<div class="row"><button class="btn-sm" data-action="export-data">Export backup (.json)</button>' +
@@ -1285,6 +1337,7 @@ function handleAction(el, e) {
     case "open-import-review": openImportReviewModal(); break;
     case "onboarding-skip": skipOnboarding(); break;
     case "onboarding-connect": onboardingConnect(); break;
+    case "enable-notifications": enableNotifications(); break;
   }
 }
 
@@ -1349,6 +1402,207 @@ function wireEvents() {
     if (form) handleSubmit(form, e);
   });
 }
+
+// ===========================================================================
+// AdultingActions — the public "do things" surface for Blue Bonnet
+// ===========================================================================
+// Deliberately additive/completion-only: nothing here deletes or resets
+// data. Delete/reset stay manual, deliberate actions in the UI only — an
+// assistant acting on a misread request should never be able to destroy
+// something. Every method takes a plain data object (no DOM forms) and
+// returns { ok, message } so a caller (Blue Bonnet) can report back plainly.
+function fuzzyFind(list, name, key) {
+  if (!name) return null;
+  const n = String(name).toLowerCase().trim();
+  return (
+    list.find((x) => String(x[key] || "").toLowerCase().trim() === n) ||
+    list.find((x) => String(x[key] || "").toLowerCase().includes(n)) ||
+    list.find((x) => n.includes(String(x[key] || "").toLowerCase()) && x[key]) ||
+    null
+  );
+}
+
+const AdultingActions = {
+  addBill(data) {
+    if (!data || !data.name || data.amount == null) return { ok: false, message: "Need at least a name and an amount." };
+    const type = data.type === "discretionary" ? "discretionary" : "regular";
+    const category = data.category || (type === "regular" ? "Other Regular" : "Other Discretionary");
+    STATE.bills.push({
+      id: uid("bill"), name: String(data.name), amount: Number(data.amount) || 0,
+      dueDay: Math.min(31, Math.max(1, Number(data.dueDay) || 1)), type, category,
+      recurring: data.recurring !== false, paidPeriods: {}, calendarEventId: null,
+    });
+    persist();
+    return { ok: true, message: `Added bill "${data.name}" (${fmtMoney(data.amount)}, ${type}).` };
+  },
+
+  markBillPaid(data) {
+    const b = fuzzyFind(STATE.bills, data && data.billName, "name");
+    if (!b) return { ok: false, message: `No bill found matching "${data && data.billName}".` };
+    const key = currentBillingPeriodKey();
+    b.paidPeriods = b.paidPeriods || {};
+    const wasAllPaid = STATE.bills.length > 0 && STATE.bills.every((x) => (x.paidPeriods || {})[key]);
+    b.paidPeriods[key] = true;
+    const isAllPaidNow = STATE.bills.every((x) => (x.paidPeriods || {})[key]);
+    persist();
+    if (isAllPaidNow && !wasAllPaid) showPraise("budget");
+    return { ok: true, message: `Marked "${b.name}" paid for this period.` };
+  },
+
+  addHouseholdArea(data) {
+    if (!data || !data.name) return { ok: false, message: "Need a name for the area." };
+    const template = data.templateKey ? DEFAULT_HOUSEHOLD_ASSETS.find((t) => t.key === data.templateKey) : null;
+    const items = template ? template.items.map((text) => ({ text, checked: false })) : (Array.isArray(data.items) ? data.items.map((text) => ({ text, checked: false })) : []);
+    const asset = {
+      id: uid("asset"), name: data.name, icon: template ? template.icon : "🏷️", key: template ? template.key : "custom",
+      recurrence: { type: data.recurrence === "monthly" ? "monthly" : "weekly", interval: 1 },
+      items, currentPeriodKey: null, dueDate: null, signalUp: false, completedAt: null,
+      needsAttention: { flag: false, note: "" }, calendarEventId: null,
+    };
+    refreshRecurringTask(asset);
+    STATE.assets.push(asset);
+    persist();
+    return { ok: true, message: `Added household area "${data.name}"${items.length ? " with " + items.length + " checklist item(s)" : ""}.` };
+  },
+
+  checkHouseholdItem(data) {
+    const a = fuzzyFind(STATE.assets, data && data.areaName, "name");
+    if (!a) return { ok: false, message: `No household area found matching "${data && data.areaName}".` };
+    const item = a.items.find((i) => i.text.toLowerCase().includes(String(data.itemText || "").toLowerCase()));
+    if (!item) return { ok: false, message: `No checklist item on "${a.name}" matching "${data.itemText}".` };
+    const wasDone = computeStatus(a.items) === "done";
+    item.checked = true;
+    const isDoneNow = computeStatus(a.items) === "done";
+    if (isDoneNow) a.completedAt = new Date().toISOString();
+    persist();
+    if (isDoneNow && !wasDone) showPraise("household");
+    return { ok: true, message: `Checked off "${item.text}" on ${a.name}.` };
+  },
+
+  signalAreaCaughtUp(data) {
+    const a = fuzzyFind(STATE.assets, data && data.areaName, "name");
+    if (!a) return { ok: false, message: `No household area found matching "${data && data.areaName}".` };
+    a.signalUp = true;
+    persist();
+    showPraise("signalUp");
+    return { ok: true, message: `Marked ${a.name} as fully caught up.` };
+  },
+
+  flagNeedsAttention(data) {
+    if (!data || !data.domain || !data.name) return { ok: false, message: "Need to know what area/vehicle/trip this is about." };
+    const payload = { flag: true, note: data.note || "", requestedAt: new Date().toISOString() };
+    let label = null;
+    if (data.domain === "household") {
+      const a = fuzzyFind(STATE.assets, data.name, "name");
+      if (!a) return { ok: false, message: `No household area found matching "${data.name}".` };
+      a.needsAttention = payload; label = a.name;
+    } else if (data.domain === "vehicle") {
+      const v = fuzzyFind(STATE.vehicles, data.name, "name");
+      if (!v) return { ok: false, message: `No vehicle found matching "${data.name}".` };
+      const t = fuzzyFind(v.tasks || [], data.taskName, "title");
+      if (!t) return { ok: false, message: `No maintenance task on ${v.name} matching "${data.taskName}".` };
+      t.needsAttention = payload; label = v.name + " — " + t.title;
+    } else if (data.domain === "trip") {
+      const tr = fuzzyFind(STATE.trips, data.name, "name");
+      if (!tr) return { ok: false, message: `No trip found matching "${data.name}".` };
+      tr.needsAttention = payload; label = tr.name;
+    } else {
+      return { ok: false, message: 'domain must be "household", "vehicle", or "trip".' };
+    }
+    persist();
+    return { ok: true, message: `Flagged "${label}" as needing attention.` };
+  },
+
+  addGrocery(data) {
+    if (!data || !data.name) return { ok: false, message: "Need an item name." };
+    const purchaseDate = data.purchaseDate || todayISO();
+    const expirationDate = data.expirationDate || addDaysISO(purchaseDate, suggestExpiration(data.name));
+    STATE.groceries.push({ id: uid("grocery"), name: data.name, qty: Number(data.qty) || 1, purchaseDate, expirationDate, used: false, thrown: false });
+    persist();
+    return { ok: true, message: `Added ${data.name} to groceries, use by ${fmtDate(expirationDate)}.` };
+  },
+
+  markGroceryUsed(data) {
+    const g = fuzzyFind(STATE.groceries.filter((x) => !x.used && !x.thrown), data && data.name, "name");
+    if (!g) return { ok: false, message: `No active grocery item found matching "${data && data.name}".` };
+    const usedBeforeExpiry = groceryStatus(g) !== "expired";
+    g.used = true;
+    persist();
+    if (usedBeforeExpiry) showPraise("grocery");
+    return { ok: true, message: `Marked ${g.name} used.` };
+  },
+
+  markGroceryThrown(data) {
+    const g = fuzzyFind(STATE.groceries.filter((x) => !x.used && !x.thrown), data && data.name, "name");
+    if (!g) return { ok: false, message: `No active grocery item found matching "${data && data.name}".` };
+    g.thrown = true;
+    persist();
+    return { ok: true, message: `Marked ${g.name} thrown out.` };
+  },
+
+  addVehicle(data) {
+    if (!data || !data.name) return { ok: false, message: "Need a name for the vehicle." };
+    const mileage = Number(data.mileage) || 0;
+    const tasks = DEFAULT_VEHICLE_TASKS.map((t) => ({
+      id: uid("vtask"), title: t.title, intervalDays: t.intervalDays || null, intervalMiles: t.intervalMiles || null,
+      lastDoneDate: null, lastDoneMileage: null,
+      dueDate: t.intervalDays ? addDaysISO(todayISO(), t.intervalDays) : null,
+      dueMileage: t.intervalMiles ? mileage + t.intervalMiles : null,
+      needsAttention: { flag: false, note: "" }, calendarEventId: null,
+    }));
+    STATE.vehicles.push({ id: uid("vehicle"), name: data.name, year: data.year || "", make: data.make || "", model: data.model || "", mileage, tasks });
+    persist();
+    return { ok: true, message: `Added vehicle "${data.name}" with default maintenance tasks.` };
+  },
+
+  completeVehicleTaskByName(data) {
+    const v = fuzzyFind(STATE.vehicles, data && data.vehicleName, "name");
+    if (!v) return { ok: false, message: `No vehicle found matching "${data && data.vehicleName}".` };
+    const t = fuzzyFind(v.tasks || [], data && data.taskTitle, "title");
+    if (!t) return { ok: false, message: `No maintenance task on ${v.name} matching "${data && data.taskTitle}".` };
+    t.lastDoneDate = todayISO(); t.lastDoneMileage = v.mileage;
+    if (t.intervalDays) t.dueDate = addDaysISO(todayISO(), t.intervalDays);
+    if (t.intervalMiles) t.dueMileage = v.mileage + t.intervalMiles;
+    persist();
+    showPraise("vehicle");
+    return { ok: true, message: `Marked "${t.title}" done for ${v.name}.` };
+  },
+
+  updateVehicleMileage(data) {
+    const v = fuzzyFind(STATE.vehicles, data && data.vehicleName, "name");
+    if (!v) return { ok: false, message: `No vehicle found matching "${data && data.vehicleName}".` };
+    if (data.mileage == null) return { ok: false, message: "Need a mileage value." };
+    v.mileage = Number(data.mileage) || v.mileage;
+    persist();
+    return { ok: true, message: `Updated ${v.name}'s mileage to ${v.mileage.toLocaleString()}.` };
+  },
+
+  addTrip(data) {
+    if (!data || !data.name || !data.startDate) return { ok: false, message: "Need a trip name and a start date." };
+    const startDate = data.startDate;
+    const prep = DEFAULT_TRAVEL_TEMPLATE.prep.map((p) => ({ text: p.text, checked: false, dueDate: addDaysISO(startDate, -p.leadDays) }));
+    const packing = DEFAULT_TRAVEL_TEMPLATE.packing.map((text) => ({ text, checked: false }));
+    const departureDay = DEFAULT_TRAVEL_TEMPLATE.departureDay.map((text) => ({ text, checked: false }));
+    STATE.trips.push({ id: uid("trip"), name: data.name, destination: data.destination || "", startDate, endDate: data.endDate || "", prep, packing, departureDay, needsAttention: { flag: false, note: "" } });
+    persist();
+    return { ok: true, message: `Created trip "${data.name}" with a full prep/packing/departure checklist.` };
+  },
+
+  checkTripItem(data) {
+    const t = fuzzyFind(STATE.trips, data && data.tripName, "name");
+    if (!t) return { ok: false, message: `No trip found matching "${data && data.tripName}".` };
+    const phase = ["prep", "packing", "departureDay"].includes(data.phase) ? data.phase : "packing";
+    const item = t[phase].find((i) => i.text.toLowerCase().includes(String(data.itemText || "").toLowerCase()));
+    if (!item) return { ok: false, message: `No ${phase} item on "${t.name}" matching "${data.itemText}".` };
+    const wasDone = tripProgress(t).status === "done";
+    item.checked = true;
+    const isDoneNow = tripProgress(t).status === "done";
+    persist();
+    if (isDoneNow && !wasDone) showPraise("travel");
+    return { ok: true, message: `Checked off "${item.text}" for ${t.name}.` };
+  },
+};
+window.AdultingActions = AdultingActions;
 
 // ===========================================================================
 // Init
