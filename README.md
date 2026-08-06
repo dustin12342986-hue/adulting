@@ -84,6 +84,22 @@ A few things it can do beyond plain chat, all in Settings → Blue Bonnet Assist
 
 Settings → **Notifications** → **Enable notifications** turns on real OS popup notifications for encouragement bubbles and Blue Bonnet check-ins, but only while a tab with Adulting open is somewhere on your device (even minimized or behind another window) — closing the tab/browser stops them, since this app has no background server to send them otherwise. Your browser will ask you to allow notifications the first time; if you say no, you can change your mind later in your browser's own site settings.
 
+## Trying it without your own data (demo mode)
+
+Open the app with `?demo=1` added to the URL (e.g. `https://your-site/adulting/?demo=1`) — or use the "See a live demo" link on the welcome screen or in Settings → About — to explore a fully populated sample household. A banner at the top makes it obvious you're in demo mode, and nothing you do there is ever saved or written to your real data; closing the tab or dropping `?demo=1` throws it away completely. Safe to share the link with anyone.
+
+## Recent additions
+
+**Vehicles**: adding a vehicle now has a review step where every default maintenance task's due date can be adjusted before anything's added to the list, and any task's due date/mileage can be edited directly afterward (✏️ button).
+
+**Groceries**: each item shows a matching emoji automatically. Items with a quantity greater than 1 get a "Use" dropdown so you can use part of a batch (e.g. 2 of 6 salmon pieces) instead of only being able to mark the whole entry used at once.
+
+**Travel**: you can add your own custom checklist items on top of the built-in template (a small "Add an item" box under each list), and edit a trip's start/end dates anytime — existing prep due-dates shift along with the new start date automatically.
+
+**Calendar sync stays manual everywhere** — there's no auto-push of your data to Google Calendar; every sync (bills, household areas, vehicle tasks, trip prep) is a deliberate button click, or something Blue Bonnet does only when you explicitly ask it to ("sync my rent to my calendar").
+
+**Cross-device sync via Google Drive**: once connected to Google, your data now also saves to a private file in your own Google Drive (a hidden per-app storage area — not visible in your regular Drive, and no other app can read it) and loads automatically the next time you sign in on any device with that same Google account. Settings → Google Calendar → "Sync now" triggers it manually anytime. This reuses your existing Google sign-in — no separate account or new setup — but since it needs a broader permission than before, you may see an updated consent screen the next time you connect; approving it is what enables this.
+
 ## Backing up your data
 
 Settings → **Export backup (.json)** downloads everything. **Import backup** restores it (on this device or a new one). There's no cloud account and no server — the exported file *is* your backup, so keep a copy somewhere safe if the data matters.
