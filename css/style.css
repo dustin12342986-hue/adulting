@@ -354,6 +354,16 @@ tr:last-child td { border-bottom: none; }
 @keyframes praise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
 body.board-mode-active .praise-toast { display: none; }
 
+/* Demo mode banner — always visible while ?demo is active, so it's never
+   ambiguous whether you're looking at real saved data or sample data. */
+#demoBanner {
+  display: none; align-items: center; justify-content: center; gap: 14px;
+  flex-wrap: wrap; text-align: center;
+  background: #3a2f6b; color: #fff; padding: 10px 16px; font-size: 13.5px; font-weight: 600;
+  position: sticky; top: 0; z-index: 2147482999;
+}
+#demoBanner a { color: #ffd873; text-decoration: underline; font-weight: 700; }
+
 /* Focus mode: shows one checklist item at a time to cut down overwhelm */
 .focus-item {
   background: var(--surface-2); border-radius: var(--radius);
