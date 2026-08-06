@@ -419,6 +419,11 @@ specifics you weren't given.
     { name: "check_trip_item", description: "Check off one item on a trip's prep, packing, or departure-day list.", input_schema: { type: "object", properties: {
       tripName: { type: "string" }, phase: { type: "string", enum: ["prep", "packing", "departureDay"] }, itemText: { type: "string" },
     }, required: ["tripName", "itemText"] } },
+    { name: "sync_to_calendar", description: "Push a specific bill, household area, vehicle maintenance task, or trip's prep dates to the user's connected Google Calendar. Only use when the user clearly asks to sync/add something to their calendar — sync stays manual/per-item everywhere in this app, never automatic.", input_schema: { type: "object", properties: {
+      domain: { type: "string", enum: ["bill", "household", "vehicle", "trip"] },
+      name: { type: "string", description: "Bill name, household area name, vehicle name, or trip name" },
+      taskName: { type: "string", description: "Only for domain=vehicle: which maintenance task" },
+    }, required: ["domain", "name"] } },
   ];
 
   const TOOL_HANDLERS = {
@@ -436,14 +441,18 @@ specifics you weren't given.
     update_vehicle_mileage: (i) => window.AdultingActions.updateVehicleMileage(i),
     add_trip: (i) => window.AdultingActions.addTrip(i),
     check_trip_item: (i) => window.AdultingActions.checkTripItem(i),
+    sync_to_calendar: (i) => window.AdultingActions.syncToCalendar(i),
   };
 
-  function callTool(name, input) {
+  async function callTool(name, input) {
     if (!window.AdultingActions) return { ok: false, message: "The app isn't ready to make changes right now." };
     const handler = TOOL_HANDLERS[name];
     if (!handler) return { ok: false, message: "Unknown action: " + name };
     try {
-      return handler(input || {});
+      // await works fine here whether handler returns a plain object or a
+      // Promise (e.g. the calendar-sync tool, which is async) — plain
+      // values just resolve immediately.
+      return await handler(input || {});
     } catch (err) {
       return { ok: false, message: "That didn't work: " + err.message };
     }
@@ -746,11 +755,12 @@ specifics you weren't given.
         if (!toolBlocks.length) break;
 
         loadingRow.querySelector("#bb-loading").textContent = "doing that now...";
-        const resultBlocks = toolBlocks.map((tb) => {
-          const result = callTool(tb.name, tb.input);
+        const resultBlocks = [];
+        for (const tb of toolBlocks) {
+          const result = await callTool(tb.name, tb.input);
           renderActionNote(result.message, result.ok);
-          return { type: "tool_result", tool_use_id: tb.id, content: JSON.stringify(result) };
-        });
+          resultBlocks.push({ type: "tool_result", tool_use_id: tb.id, content: JSON.stringify(result) });
+        }
         messages.push({ role: "user", content: resultBlocks });
         loadingRow.querySelector("#bb-loading").textContent = "thinking it through...";
       }

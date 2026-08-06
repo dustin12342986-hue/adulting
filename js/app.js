@@ -5,12 +5,18 @@
    re-renders the current tab.
    ========================================================================== */
 
-let STATE = loadState();
+// A ?demo (or ?demo=1) URL flag loads a fully populated sample household
+// entirely in memory — nothing here ever touches real localStorage, so it's
+// safe to share/reopen without risking anyone's actual saved data. See
+// buildDemoState() near the bottom of this file for the seed data itself.
+const DEMO_MODE = /(^|[?&])demo(=|&|$)/.test(location.search);
+let STATE = DEMO_MODE ? buildDemoState() : loadState();
 let currentTab = "dashboard";
 let expandedIds = new Set(); // UI-only: which cards are expanded
 let focusState = null; // { tripId, phase, index } — UI-only
 let boardMode = location.hash === "#board"; // UI-only: standalone status-light board
 let pendingImportCandidates = []; // UI-only: last calendar-scan results awaiting review
+let pendingVehicleDraft = null; // UI-only: vehicle basics collected before the maintenance-date review step
 
 // ---------------------------------------------------------------------------
 // Icons — colorful (emoji) or minimal (line SVG), toggled in Settings
@@ -106,9 +112,50 @@ function fmtRelativeDays(iso) {
   return Math.abs(d) + " days overdue";
 }
 
+let driveSyncTimer = null;
+
 function persist() {
-  saveState(STATE);
+  STATE.updatedAt = Date.now();
+  if (!DEMO_MODE) saveState(STATE);
   render();
+  scheduleDrivePush();
+}
+
+// Cross-device sync: after any change, push the updated state to the
+// user's Google Drive (their own hidden per-app storage — see
+// drivesync.js), debounced so a burst of quick edits doesn't fire a
+// network request per click. No-ops entirely if Drive isn't
+// available/connected, or in demo mode.
+function scheduleDrivePush() {
+  if (DEMO_MODE) return;
+  if (typeof DriveSync === "undefined" || !DriveSync.available()) return;
+  clearTimeout(driveSyncTimer);
+  driveSyncTimer = setTimeout(() => {
+    DriveSync.push(STATE).catch((e) => console.warn("Drive sync push failed:", e));
+  }, 1500);
+}
+
+// Called right after a successful Google connect (and once on load if a
+// silent token refresh works). Compares Drive's copy against the local
+// one by updatedAt and takes whichever is newer — see drivesync.js header
+// comment for the exact (last-write-wins) sync model.
+async function syncFromDriveIfNewer() {
+  if (DEMO_MODE) return;
+  if (typeof DriveSync === "undefined" || !DriveSync.available()) return;
+  try {
+    const remote = await DriveSync.pull();
+    if (remote && typeof remote === "object" && (remote.updatedAt || 0) > (STATE.updatedAt || 0)) {
+      STATE = remote;
+      window.STATE = STATE;
+      saveState(STATE);
+      render();
+      toast("Loaded your latest data from Google Drive");
+    } else {
+      await DriveSync.push(STATE);
+    }
+  } catch (e) {
+    console.warn("Drive sync failed:", e);
+  }
 }
 
 function toast(msg) {
@@ -217,7 +264,7 @@ async function syncToCalendar(opts) {
 // ---------------------------------------------------------------------------
 function refreshAll() {
   STATE.assets.forEach(refreshRecurringTask);
-  saveState(STATE);
+  if (!DEMO_MODE) saveState(STATE);
 }
 
 // ---------------------------------------------------------------------------
@@ -704,13 +751,20 @@ function renderGroceries() {
   function row(g) {
     const s = groceryStatus(g);
     const label = { expired: "Expired", soon: "Use soon", fresh: "Fresh" }[s];
+    const emoji = typeof groceryEmoji === "function" ? groceryEmoji(g.name) : "🍽️";
+    const qty = g.qty || 1;
+    const useControls = qty > 1
+      ? '<form class="row" data-form="grocery-use" data-id="' + g.id + '" style="gap:4px;align-items:center;display:inline-flex">' +
+          '<select name="amount" style="width:56px">' + Array.from({ length: qty }, (_, i) => i + 1).map((n) => '<option value="' + n + '">' + n + "</option>").join("") + "</select>" +
+          '<button class="btn-sm" type="submit">Use</button></form>'
+      : '<button class="btn-sm" data-action="mark-grocery-used" data-id="' + g.id + '">Used it</button>';
     return "<tr>" +
-      "<td>" + escapeHtml(g.name) + (g.qty > 1 ? ' <span class="muted small">×' + g.qty + "</span>" : "") + "</td>" +
+      "<td>" + emoji + " " + escapeHtml(g.name) + (qty > 1 ? ' <span class="muted small">×' + qty + "</span>" : "") + "</td>" +
       "<td class=\"muted small\">" + fmtDate(g.purchaseDate) + "</td>" +
       "<td>" + fmtDate(g.expirationDate) + "</td>" +
       "<td><span class=\"status-pill " + (s === "expired" ? "attention" : s === "soon" ? "partial" : "done") + '">' + label + "</span></td>" +
       "<td><div class=\"row\">" +
-        '<button class="btn-sm" data-action="mark-grocery-used" data-id="' + g.id + '">Used it</button>' +
+        useControls +
         '<button class="btn-sm btn-danger" data-action="mark-grocery-thrown" data-id="' + g.id + '">Toss</button>' +
       "</div></td></tr>";
   }
@@ -720,7 +774,7 @@ function renderGroceries() {
     (active.length ? '<div class="card"><table><thead><tr><th>Item</th><th>Bought</th><th>Use by</th><th>Status</th><th></th></tr></thead><tbody>' + active.map(row).join("") + "</tbody></table></div>"
       : emptyState("🛒", "Nothing tracked yet", "Add groceries as you buy them and set an expiration date.")) +
     (resolved.length ? '<div class="section-title">Used / thrown out (' + resolved.length + ')</div><div class="card"><table><tbody>' +
-      resolved.slice(-10).reverse().map((g) => "<tr><td>" + escapeHtml(g.name) + "</td><td class=\"muted small\">" + (g.used ? "Used" : "Thrown out") + "</td><td><button class=\"btn-sm\" data-action=\"delete-grocery\" data-id=\"" + g.id + "\">Remove</button></td></tr>").join("") +
+      resolved.slice(-10).reverse().map((g) => "<tr><td>" + (typeof groceryEmoji === "function" ? groceryEmoji(g.name) : "🍽️") + " " + escapeHtml(g.name) + "</td><td class=\"muted small\">" + (g.used ? "Used" : "Thrown out") + "</td><td><button class=\"btn-sm\" data-action=\"delete-grocery\" data-id=\"" + g.id + "\">Remove</button></td></tr>").join("") +
       "</tbody></table></div>" : "");
 }
 
@@ -754,6 +808,20 @@ function markGroceryUsed(id) {
   const g = findById(STATE.groceries, id);
   const usedBeforeExpiry = groceryStatus(g) !== "expired";
   g.used = true;
+  persist();
+  if (usedBeforeExpiry) showPraise("grocery");
+}
+
+// Decrement a specific quantity (e.g. "use 2 of the 6 salmon pieces") rather
+// than resolving the whole entry at once. Only marks it fully used/resolved
+// once the quantity actually reaches zero.
+function useGroceryQty(id, amount) {
+  const g = findById(STATE.groceries, id);
+  const qty = g.qty || 1;
+  amount = Math.max(1, Math.min(Number(amount) || 1, qty));
+  const usedBeforeExpiry = groceryStatus(g) !== "expired";
+  g.qty = qty - amount;
+  if (g.qty <= 0) { g.qty = 0; g.used = true; }
   persist();
   if (usedBeforeExpiry) showPraise("grocery");
 }
@@ -792,6 +860,7 @@ function renderVehicleDetail(v) {
     return "<tr><td>" + escapeHtml(t.title) + (t.needsAttention && t.needsAttention.flag ? " 🚩" : "") + "</td><td class=\"muted small\">" + due.join(" / ") + "</td><td>" + pill + "</td>" +
       "<td><div class=\"row\">" +
       '<button class="btn-sm" data-action="complete-vehicle-task" data-id="' + v.id + '" data-task="' + t.id + '">Mark done</button>' +
+      '<button class="btn-sm" data-action="edit-vehicle-task" data-id="' + v.id + '" data-task="' + t.id + '" title="Edit due date/mileage">✏️</button>' +
       '<button class="btn-sm" data-action="sync-vehicle-task-calendar" data-id="' + v.id + '" data-task="' + t.id + '">📅</button>' +
       '<button class="btn-sm btn-danger" data-action="open-attention-modal" data-domain="vehicle" data-id="' + v.id + '" data-task="' + t.id + '">🚩</button>' +
       "</div></td></tr>";
@@ -804,27 +873,82 @@ function renderVehicleDetail(v) {
 
 function openAddVehicleModal() {
   openModal(
-    '<h3>Add vehicle</h3><form data-form="vehicle">' +
+    '<h3>Add vehicle</h3><form data-form="vehicle-step1">' +
     '<div class="field"><label>Name (e.g. Honda Civic)</label><input type="text" name="name" required /></div>' +
     '<div class="field-row"><div class="field"><label>Year</label><input type="number" name="year" /></div><div class="field"><label>Make</label><input type="text" name="make" /></div><div class="field"><label>Model</label><input type="text" name="model" /></div></div>' +
     '<div class="field"><label>Current mileage</label><input type="number" name="mileage" value="0" /></div>' +
-    '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Add</button></div></form>'
+    '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Next: review dates</button></div></form>'
   );
 }
 
-function addVehicleForm(form) {
+// Step 1: collect the vehicle basics, then move to a review step where every
+// default maintenance task's due date can be adjusted before anything is
+// actually added to the main task list.
+function addVehicleStep1(form) {
   const data = collectFormData(form);
-  const mileage = Number(data.mileage) || 0;
-  const tasks = DEFAULT_VEHICLE_TASKS.map((t) => ({
+  if (!data.name) return;
+  pendingVehicleDraft = { name: data.name, year: data.year || "", make: data.make || "", model: data.model || "", mileage: Number(data.mileage) || 0 };
+  openVehicleTaskReviewModal();
+}
+
+function openVehicleTaskReviewModal() {
+  const v = pendingVehicleDraft;
+  if (!v) return;
+  const rows = DEFAULT_VEHICLE_TASKS.map((t, i) => {
+    const defaultDate = t.intervalDays ? addDaysISO(todayISO(), t.intervalDays) : "";
+    return '<div class="field-row" style="align-items:flex-end">' +
+      '<div class="field" style="flex:2"><label>' + escapeHtml(t.title) + "</label></div>" +
+      (t.intervalDays
+        ? '<div class="field"><input type="date" name="date_' + i + '" value="' + defaultDate + '" /></div>'
+        : '<div class="field muted small" style="padding-bottom:8px">Mileage-based (' + (t.intervalMiles || 0).toLocaleString() + " mi)</div>") +
+      "</div>";
+  }).join("");
+  openModal(
+    '<h3>Review maintenance dates</h3>' +
+    '<p class="muted small">Adjust any due dates before adding <strong>' + escapeHtml(v.name) + "</strong> — nothing is on the task list yet. Mileage-based tasks are calculated from the mileage you just entered.</p>" +
+    '<form data-form="vehicle-step2">' + rows +
+    '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Add vehicle</button></div></form>'
+  );
+}
+
+function addVehicleStep2(form) {
+  const draft = pendingVehicleDraft;
+  if (!draft) return;
+  const data = collectFormData(form);
+  const tasks = DEFAULT_VEHICLE_TASKS.map((t, i) => ({
     id: uid("vtask"), title: t.title,
     intervalDays: t.intervalDays || null, intervalMiles: t.intervalMiles || null,
     lastDoneDate: null, lastDoneMileage: null,
-    dueDate: t.intervalDays ? addDaysISO(todayISO(), t.intervalDays) : null,
-    dueMileage: t.intervalMiles ? mileage + t.intervalMiles : null,
+    dueDate: t.intervalDays ? (data["date_" + i] || addDaysISO(todayISO(), t.intervalDays)) : null,
+    dueMileage: t.intervalMiles ? draft.mileage + t.intervalMiles : null,
     needsAttention: { flag: false, note: "" }, calendarEventId: null,
   }));
-  STATE.vehicles.push({ id: uid("vehicle"), name: data.name, year: data.year, make: data.make, model: data.model, mileage, tasks });
-  closeModal(); persist(); toast("Added " + data.name);
+  STATE.vehicles.push({ id: uid("vehicle"), name: draft.name, year: draft.year, make: draft.make, model: draft.model, mileage: draft.mileage, tasks });
+  pendingVehicleDraft = null;
+  closeModal(); persist(); toast("Added " + draft.name);
+}
+
+// Direct edit of a single task's due date/mileage after the vehicle already
+// exists — the ongoing "dates can be changed freely" control.
+function openEditVehicleTaskModal(vehicleId, taskId) {
+  const v = findById(STATE.vehicles, vehicleId);
+  const t = findById(v.tasks, taskId);
+  openModal(
+    '<h3>Edit "' + escapeHtml(t.title) + '"</h3><form data-form="edit-vehicle-task" data-id="' + vehicleId + '" data-task="' + taskId + '">' +
+    (t.intervalDays != null || t.dueDate ? '<div class="field"><label>Due date</label><input type="date" name="dueDate" value="' + (t.dueDate || "") + '" /></div>' : "") +
+    (t.intervalMiles != null || t.dueMileage != null ? '<div class="field"><label>Due mileage</label><input type="number" name="dueMileage" value="' + (t.dueMileage != null ? t.dueMileage : "") + '" /></div>' : "") +
+    '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Save</button></div></form>'
+  );
+}
+
+function saveVehicleTaskEdit(form) {
+  const { id, task } = form.dataset;
+  const v = findById(STATE.vehicles, id);
+  const t = findById(v.tasks, task);
+  const data = collectFormData(form);
+  if ("dueDate" in data) t.dueDate = data.dueDate || null;
+  if ("dueMileage" in data) t.dueMileage = data.dueMileage !== "" ? Number(data.dueMileage) : null;
+  closeModal(); persist(); toast("Updated " + t.title);
 }
 
 function toggleVehicleOpen(id) { expandedIds.has(id) ? expandedIds.delete(id) : expandedIds.add(id); render(); }
@@ -886,6 +1010,7 @@ function phaseBlock(trip, phase, title) {
   const items_html = items.map((it, idx) =>
     '<li class="' + (it.checked ? "checked" : "") + '"><input type="checkbox" id="ti_' + trip.id + "_" + phase + "_" + idx + '" data-action="toggle-trip-item" data-id="' + trip.id + '" data-phase="' + phase + '" data-index="' + idx + '" ' + (it.checked ? "checked" : "") + ' /><label for="ti_' + trip.id + "_" + phase + "_" + idx + '">' + escapeHtml(it.text) + (it.dueDate ? ' <span class="muted small">(' + fmtRelativeDays(it.dueDate) + ")</span>" : "") + "</label></li>").join("");
   return '<div class="section-title">' + title + " (" + items.filter((i) => i.checked).length + "/" + items.length + ')</div><ul class="checklist">' + items_html + "</ul>" +
+    '<form class="row" data-form="add-trip-item" data-id="' + trip.id + '" data-phase="' + phase + '" style="margin:6px 0"><input type="text" name="text" placeholder="Add an item" style="flex:1" /><button class="btn-sm" type="submit">Add</button></form>' +
     '<button class="btn-sm btn-ghost" data-action="focus-mode" data-id="' + trip.id + '" data-phase="' + phase + '">🎯 Focus mode (one item at a time)</button>';
 }
 
@@ -896,10 +1021,45 @@ function renderTripDetail(t) {
     '<div class="hr"></div>' + phaseBlock(t, "departureDay", "Departure day") +
     '<div class="hr"></div>' +
     '<div class="row" style="flex-wrap:wrap">' +
+      '<button class="btn-sm" data-action="edit-trip-dates" data-id="' + t.id + '">✏️ Edit dates</button>' +
       '<button class="btn-sm btn-danger" data-action="open-attention-modal" data-domain="trip" data-id="' + t.id + '">🚩 Flag needs attention</button>' +
       '<button class="btn-sm" data-action="sync-trip-calendar" data-id="' + t.id + '">📅 Sync prep dates to calendar</button>' +
       '<button class="btn-sm btn-ghost" data-action="delete-trip" data-id="' + t.id + '">Delete trip</button>' +
     "</div>";
+}
+
+function addTripItem(form) {
+  const { id, phase } = form.dataset;
+  const text = collectFormData(form).text;
+  if (!text) return;
+  const t = findById(STATE.trips, id);
+  t[phase].push(phase === "prep" ? { text, checked: false, dueDate: null } : { text, checked: false });
+  persist();
+}
+
+function openEditTripModal(id) {
+  const t = findById(STATE.trips, id);
+  openModal(
+    '<h3>Edit trip dates</h3><form data-form="edit-trip" data-id="' + id + '">' +
+    '<div class="field-row"><div class="field"><label>Start date</label><input type="date" name="startDate" value="' + (t.startDate || "") + '" required /></div><div class="field"><label>End date</label><input type="date" name="endDate" value="' + (t.endDate || "") + '" /></div></div>' +
+    '<p class="muted small">Any existing prep due-dates will shift along with the new start date, so the lead-time (e.g. "7 days before") stays the same.</p>' +
+    '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Save</button></div></form>'
+  );
+}
+
+function saveTripDatesEdit(form) {
+  const id = form.dataset.id;
+  const t = findById(STATE.trips, id);
+  const data = collectFormData(form);
+  const oldStart = t.startDate;
+  const newStart = data.startDate;
+  if (oldStart && newStart && oldStart !== newStart) {
+    const delta = daysBetween(oldStart, newStart);
+    t.prep.forEach((p) => { if (p.dueDate) p.dueDate = addDaysISO(p.dueDate, delta); });
+  }
+  t.startDate = newStart;
+  t.endDate = data.endDate || "";
+  closeModal(); persist(); toast("Trip dates updated");
 }
 
 function openAddTripModal() {
@@ -1024,7 +1184,8 @@ function renderSettings() {
     (connected ? '<button type="button" class="btn-sm btn-ghost" data-action="disconnect-calendar">Disconnect</button><span class="status-pill done">Connected</span>' : '<span class="status-pill none">Not connected</span>') +
     "</div></form>" +
     (connected ? '<div class="hr"></div><div class="row between"><div><strong class="small">Import from Calendar</strong><div class="muted small">Scans your calendar for bills, vehicle maintenance, and trips it can suggest.</div></div><button class="btn-sm" data-action="run-calendar-import">Scan now</button></div>' +
-      '<label class="row small" style="margin-top:10px"><input type="checkbox" name="autoImportCalendar" data-action="toggle-auto-import" ' + (STATE.settings.autoImportCalendar ? "checked" : "") + ' style="width:18px;height:18px" /> Import matches automatically, without asking each time</label>'
+      '<label class="row small" style="margin-top:10px"><input type="checkbox" name="autoImportCalendar" data-action="toggle-auto-import" ' + (STATE.settings.autoImportCalendar ? "checked" : "") + ' style="width:18px;height:18px" /> Import matches automatically, without asking each time</label>' +
+      '<div class="hr"></div><div class="row between"><div><strong class="small">Cross-device sync</strong><div class="muted small">Your data is saved to your own Google Drive (a private folder only this app can see) and loaded automatically on any device you sign in on with this same Google account.</div></div><button class="btn-sm" data-action="sync-drive-now">Sync now</button></div>'
       : "") +
     "</div>" +
 
@@ -1052,7 +1213,8 @@ function renderSettings() {
     '<button class="btn-sm btn-danger" data-action="reset-data">Reset all data</button></div></div>' +
 
     '<div class="card" style="max-width:560px"><h2>About this app</h2>' +
-    '<p class="small muted">Adulting is designed to be calm and predictable: consistent status colors everywhere, short checklists broken into small steps, and a clear "you’re caught up" state instead of nagging. Built with ADHD, autistic, and other neurodivergent users in mind.</p></div>';
+    '<p class="small muted">Adulting is designed to be calm and predictable: consistent status colors everywhere, short checklists broken into small steps, and a clear "you’re caught up" state instead of nagging. Built with ADHD, autistic, and other neurodivergent users in mind.</p>' +
+    '<p class="small muted" style="margin-top:8px"><a href="?demo=1" target="_blank" rel="noopener">Open a live demo with sample data →</a> (safe to share — never touches real saved data)</p></div>';
 }
 
 function saveBlueBonnetSettings(form) {
@@ -1086,12 +1248,25 @@ function saveCalendarSettings(form) {
 }
 
 async function connectCalendar() {
+  // Pull whatever's currently typed in the Client ID / Calendar ID fields
+  // into STATE first — clicking Connect right after editing the field
+  // (without a separate Save click) used to silently connect with the
+  // OLD stored value, which looked identical to the field but produced a
+  // confusing "invalid_client" error. Connect now always saves first.
+  const form = $('form[data-form="settings-calendar"]');
+  if (form) {
+    const data = collectFormData(form);
+    if (data.googleClientId) STATE.settings.googleClientId = data.googleClientId;
+    if (data.defaultCalendarId) STATE.settings.defaultCalendarId = data.defaultCalendarId;
+    saveState(STATE);
+  }
   if (!STATE.settings.googleClientId) { toast("Enter your Google OAuth Client ID first."); return; }
   try {
     await Calendar.init(STATE.settings.googleClientId);
     await Calendar.connect();
     toast("Connected to Google Calendar");
     render();
+    await syncFromDriveIfNewer();
   } catch (e) {
     console.error(e);
     toast("Couldn’t connect: " + e.message);
@@ -1118,6 +1293,7 @@ function renderOnboarding() {
     '<button type="button" class="btn-ghost" data-action="onboarding-skip">Skip for now</button>' +
     "</div></form>" +
     '<p class="muted small" style="margin-top:14px">You can connect anytime from Settings. Nothing is shared with anyone else — this app has no server.</p>' +
+    '<p class="muted small" style="margin-top:6px"><a href="?demo=1">See a live demo with sample data first →</a></p>' +
     "</div></div>";
 }
 
@@ -1136,6 +1312,7 @@ async function onboardingConnect() {
     persist();
     $("#onboardingRoot").innerHTML = "";
     toast("Connected! Scanning your calendar…");
+    await syncFromDriveIfNewer();
     await runCalendarImport();
   } catch (e) {
     console.error(e);
@@ -1314,10 +1491,12 @@ function handleAction(el, e) {
     case "open-add-vehicle-modal": openAddVehicleModal(); break;
     case "toggle-vehicle-open": toggleVehicleOpen(id); break;
     case "complete-vehicle-task": completeVehicleTask(id, el.dataset.task); break;
+    case "edit-vehicle-task": openEditVehicleTaskModal(id, el.dataset.task); break;
     case "delete-vehicle": if (confirm("Delete this vehicle?")) deleteVehicle(id); break;
     case "sync-vehicle-task-calendar": syncVehicleTaskCalendar(id, el.dataset.task); break;
     case "open-add-trip-modal": openAddTripModal(); break;
     case "toggle-trip-open": toggleTripOpen(id); break;
+    case "edit-trip-dates": openEditTripModal(id); break;
     case "delete-trip": if (confirm("Delete this trip?")) deleteTrip(id); break;
     case "sync-trip-calendar": syncTripCalendar(id); break;
     case "focus-mode": startFocusMode(id, el.dataset.phase); break;
@@ -1338,6 +1517,7 @@ function handleAction(el, e) {
     case "onboarding-skip": skipOnboarding(); break;
     case "onboarding-connect": onboardingConnect(); break;
     case "enable-notifications": enableNotifications(); break;
+    case "sync-drive-now": syncFromDriveIfNewer().then(() => toast("Synced with Google Drive")); break;
   }
 }
 
@@ -1364,9 +1544,14 @@ function handleSubmit(form, e) {
     case "add-asset-item": addAssetItem(form); form.reset(); break;
     case "attention": saveAttentionForm(form); break;
     case "grocery": addGroceryForm(form); break;
-    case "vehicle": addVehicleForm(form); break;
+    case "grocery-use": useGroceryQty(form.dataset.id, collectFormData(form).amount); break;
+    case "vehicle-step1": addVehicleStep1(form); break;
+    case "vehicle-step2": addVehicleStep2(form); break;
+    case "edit-vehicle-task": saveVehicleTaskEdit(form); break;
     case "update-mileage": updateVehicleMileage(form); break;
     case "trip": addTripForm(form); break;
+    case "add-trip-item": addTripItem(form); form.reset(); break;
+    case "edit-trip": saveTripDatesEdit(form); break;
     case "settings-general": saveGeneralSettings(form); break;
     case "settings-calendar": saveCalendarSettings(form); break;
     case "onboarding-calendar": onboardingConnect(); break;
@@ -1601,8 +1786,127 @@ const AdultingActions = {
     if (isDoneNow && !wasDone) showPraise("travel");
     return { ok: true, message: `Checked off "${item.text}" for ${t.name}.` };
   },
+
+  // Push a specific bill / household area / vehicle task / trip to Google
+  // Calendar on request — reuses the exact same manual per-item sync path
+  // the buttons in each tab already use. Calendar sync stays deliberately
+  // manual/per-item everywhere in this app (no silent auto-push-everything);
+  // this just lets Blue Bonnet trigger that same manual action when asked.
+  async syncToCalendar(data) {
+    if (!data || !data.domain || !data.name) return { ok: false, message: "Need to know what to sync (a bill, household area, vehicle task, or trip) and its name." };
+    if (!Calendar.isConnected()) {
+      const ok = await Calendar.ensureToken();
+      if (!ok) return { ok: false, message: "Google Calendar isn't connected yet — connect it in Settings first." };
+    }
+    try {
+      if (data.domain === "bill") {
+        const b = fuzzyFind(STATE.bills, data.name, "name");
+        if (!b) return { ok: false, message: `No bill found matching "${data.name}".` };
+        await syncBillCalendar(b.id);
+        return { ok: true, message: `Synced "${b.name}" to your Google Calendar.` };
+      }
+      if (data.domain === "household") {
+        const a = fuzzyFind(STATE.assets, data.name, "name");
+        if (!a) return { ok: false, message: `No household area found matching "${data.name}".` };
+        await syncAssetCalendar(a.id);
+        return { ok: true, message: `Synced "${a.name}" to your Google Calendar.` };
+      }
+      if (data.domain === "vehicle") {
+        const v = fuzzyFind(STATE.vehicles, data.name, "name");
+        if (!v) return { ok: false, message: `No vehicle found matching "${data.name}".` };
+        const t = fuzzyFind(v.tasks || [], data.taskName, "title");
+        if (!t) return { ok: false, message: `No maintenance task on ${v.name} matching "${data.taskName}".` };
+        await syncVehicleTaskCalendar(v.id, t.id);
+        return { ok: true, message: `Synced "${t.title}" for ${v.name} to your Google Calendar.` };
+      }
+      if (data.domain === "trip") {
+        const tr = fuzzyFind(STATE.trips, data.name, "name");
+        if (!tr) return { ok: false, message: `No trip found matching "${data.name}".` };
+        await syncTripCalendar(tr.id);
+        return { ok: true, message: `Synced prep dates for "${tr.name}" to your Google Calendar.` };
+      }
+      return { ok: false, message: 'domain must be "bill", "household", "vehicle", or "trip".' };
+    } catch (e) {
+      return { ok: false, message: "Calendar sync failed: " + e.message };
+    }
+  },
 };
 window.AdultingActions = AdultingActions;
+
+// ===========================================================================
+// Demo mode — a fully populated, in-memory-only sample household (see the
+// DEMO_MODE flag near the top of this file). Every status color/state is
+// represented on purpose so a first look shows the whole app working, not
+// an empty shell. Never written to localStorage.
+// ===========================================================================
+function buildDemoState() {
+  const s = defaultState();
+  s.settings.householdName = "The Demo Household";
+  s.settings.onboarded = true; // skip the welcome screen — go straight to a populated Dashboard
+
+  // ---- Bills ----
+  const billPeriod = currentBillingPeriodKey();
+  s.bills = [
+    { id: uid("bill"), name: "Rent", amount: 1450, dueDay: 1, type: "regular", category: "Rent/Mortgage", recurring: true, paidPeriods: { [billPeriod]: true }, calendarEventId: null },
+    { id: uid("bill"), name: "Electric", amount: 95, dueDay: 15, type: "regular", category: "Utilities", recurring: true, paidPeriods: {}, calendarEventId: null },
+    { id: uid("bill"), name: "Streaming subscriptions", amount: 32, dueDay: 5, type: "discretionary", category: "Subscriptions", recurring: true, paidPeriods: { [billPeriod]: true }, calendarEventId: null },
+    { id: uid("bill"), name: "Dining out budget", amount: 150, dueDay: 28, type: "discretionary", category: "Dining Out", recurring: true, paidPeriods: {}, calendarEventId: null },
+  ];
+
+  // ---- Household areas — one of each status (done/partial/none/attention) ----
+  function demoAsset(tmplKey, checkedCount, opts) {
+    opts = opts || {};
+    const t = DEFAULT_HOUSEHOLD_ASSETS.find((x) => x.key === tmplKey);
+    const items = t.items.map((text, i) => ({ text, checked: i < checkedCount }));
+    const period = currentPeriodInfo(t.recurrence);
+    return {
+      id: uid("asset"), name: t.name, icon: t.icon, key: t.key, recurrence: t.recurrence, items,
+      currentPeriodKey: period.key, dueDate: period.dueDate,
+      signalUp: !!opts.signalUp, completedAt: checkedCount === items.length ? new Date().toISOString() : null,
+      needsAttention: opts.attention ? { flag: true, note: opts.attention } : { flag: false, note: "" },
+      calendarEventId: null,
+    };
+  }
+  s.assets = [
+    demoAsset("kitchen", 6), // fully done
+    demoAsset("bathroom", 2), // partial
+    demoAsset("livingroom", 0), // none started
+    demoAsset("hvac", 0, { attention: "Filter looks pretty dirty — need to grab a 16x20 replacement." }),
+  ];
+
+  // ---- Groceries — fresh, soon, and expired represented ----
+  s.groceries = [
+    { id: uid("grocery"), name: "Milk", qty: 1, purchaseDate: addDaysISO(todayISO(), -5), expirationDate: addDaysISO(todayISO(), 2), used: false, thrown: false },
+    { id: uid("grocery"), name: "Spinach", qty: 1, purchaseDate: addDaysISO(todayISO(), -4), expirationDate: addDaysISO(todayISO(), 1), used: false, thrown: false },
+    { id: uid("grocery"), name: "Leftover pasta", qty: 1, purchaseDate: addDaysISO(todayISO(), -6), expirationDate: addDaysISO(todayISO(), -1), used: false, thrown: false },
+    { id: uid("grocery"), name: "Salmon", qty: 6, purchaseDate: addDaysISO(todayISO(), -1), expirationDate: addDaysISO(todayISO(), 2), used: false, thrown: false },
+    { id: uid("grocery"), name: "Rice", qty: 1, purchaseDate: addDaysISO(todayISO(), -10), expirationDate: addDaysISO(todayISO(), 350), used: false, thrown: false },
+  ];
+
+  // ---- Vehicle — mixed overdue / due-soon / ok tasks ----
+  const mileage = 62000;
+  const vTasks = DEFAULT_VEHICLE_TASKS.map((t, i) => ({
+    id: uid("vtask"), title: t.title, intervalDays: t.intervalDays || null, intervalMiles: t.intervalMiles || null,
+    lastDoneDate: null, lastDoneMileage: null,
+    dueDate: t.intervalDays ? addDaysISO(todayISO(), i === 0 ? -10 : i === 1 ? 7 : t.intervalDays) : null,
+    dueMileage: t.intervalMiles ? mileage + (i === 1 ? 200 : t.intervalMiles) : null,
+    needsAttention: { flag: false, note: "" }, calendarEventId: null,
+  }));
+  s.vehicles = [{ id: uid("vehicle"), name: "Honda Civic", year: "2019", make: "Honda", model: "Civic", mileage, tasks: vTasks }];
+
+  // ---- Trip — partially packed, a few days out ----
+  const startDate = addDaysISO(todayISO(), 6);
+  const prep = DEFAULT_TRAVEL_TEMPLATE.prep.map((p, i) => ({ text: p.text, checked: i < 3, dueDate: addDaysISO(startDate, -p.leadDays) }));
+  const packing = DEFAULT_TRAVEL_TEMPLATE.packing.map((text, i) => ({ text, checked: i < 5 }));
+  s.trips = [{
+    id: uid("trip"), name: "Weekend in Austin", destination: "Austin, TX", startDate, endDate: addDaysISO(startDate, 2),
+    prep, packing,
+    departureDay: DEFAULT_TRAVEL_TEMPLATE.departureDay.map((text) => ({ text, checked: false })),
+    needsAttention: { flag: false, note: "" },
+  }];
+
+  return s;
+}
 
 // ===========================================================================
 // Init
@@ -1614,10 +1918,21 @@ function init() {
   render();
   renderOnboarding();
 
+  if (DEMO_MODE) {
+    const banner = document.getElementById("demoBanner");
+    if (banner) {
+      banner.style.display = "flex";
+      banner.innerHTML =
+        '<span>👋 You\'re viewing a demo with sample data — nothing here is saved, and none of your real data is touched.</span>' +
+        '<a href="' + location.pathname + '">Exit demo</a>';
+    }
+    return; // no real Google/Calendar/Drive activity while demoing
+  }
+
   if (STATE.settings.googleClientId) {
     Calendar.init(STATE.settings.googleClientId)
       .then(() => Calendar.ensureToken())
-      .then((ok) => { if (ok) runCalendarImport(); })
+      .then((ok) => { if (ok) { runCalendarImport(); syncFromDriveIfNewer(); } })
       .catch(() => {});
   }
   // Keep ingesting new calendar changes automatically while the tab is open

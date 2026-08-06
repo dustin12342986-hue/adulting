@@ -10,7 +10,11 @@
 
 const Calendar = (function () {
   const API_BASE = "https://www.googleapis.com/calendar/v3";
-  const SCOPE = "https://www.googleapis.com/auth/calendar.events";
+  // drive.appdata is a narrow, per-app-only scope: it can only read/write
+  // files this app itself created in a hidden folder, never anything else
+  // in the user's Drive. Used by drivesync.js for cross-device sync, riding
+  // on the same sign-in/token as Calendar so there's only ever one consent.
+  const SCOPE = "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/drive.appdata";
   const TOKEN_SESSION_KEY = "adulting-gcal-token";
 
   let tokenClient = null;
@@ -70,6 +74,13 @@ const Calendar = (function () {
 
   function isConnected() {
     return !!accessToken && Date.now() < tokenExpiresAt;
+  }
+
+  // Exposed so drivesync.js can reuse the same token (it was granted both
+  // the calendar.events and drive.appdata scopes together) instead of
+  // needing its own separate sign-in.
+  function getAccessToken() {
+    return isConnected() ? accessToken : null;
   }
 
   // Interactive connect (shows Google's consent popup). Call from a user
@@ -218,7 +229,7 @@ const Calendar = (function () {
   }
 
   return {
-    init, isConnected, connect, ensureToken, disconnect,
+    init, isConnected, connect, ensureToken, disconnect, getAccessToken,
     testConnection, upsertEvent, deleteEvent, listAdultingEvents, listAllEvents,
   };
 })();

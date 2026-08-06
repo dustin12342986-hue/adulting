@@ -113,6 +113,30 @@ const SHELF_LIFE_DB = {
   "orange juice": 10, "salad dressing (opened)": 60, mayo: 60, ketchup: 180, mustard: 365,
 };
 
+// ---- Grocery item emojis (approximate match, same pattern as shelf-life) --
+const GROCERY_EMOJI_DB = {
+  milk: "🥛", eggs: "🥚", butter: "🧈", yogurt: "🥣", "cheese (hard)": "🧀", "cheese (soft)": "🧀",
+  "cream cheese": "🧀", "sour cream": "🥣", "heavy cream": "🥛", cheese: "🧀",
+  "chicken (raw)": "🍗", chicken: "🍗", "ground beef (raw)": "🥩", "beef (raw steak/roast)": "🥩", beef: "🥩",
+  "pork (raw)": "🥩", pork: "🥩", "fish (raw)": "🐟", fish: "🐟", salmon: "🐟", shrimp: "🍤",
+  bacon: "🥓", "deli meat": "🍖", sausage: "🌭",
+  bread: "🍞", tortillas: "🌮", bagels: "🥯",
+  lettuce: "🥬", spinach: "🥬", broccoli: "🥦", carrots: "🥕", celery: "🥬", cucumber: "🥒",
+  tomatoes: "🍅", "bell peppers": "🫑", potatoes: "🥔", onions: "🧅", garlic: "🧄", peppers: "🫑",
+  bananas: "🍌", apples: "🍎", oranges: "🍊", grapes: "🍇", berries: "🍓", strawberries: "🍓", avocado: "🥑",
+  "leftovers (cooked)": "🍱", "cooked rice": "🍚", "cooked pasta": "🍝", soup: "🍲",
+  "frozen meat": "🥩", "frozen vegetables": "🥦", "frozen meals": "🍱", "ice cream": "🍦",
+  "canned goods": "🥫", rice: "🍚", pasta: "🍝", cereal: "🥣", "peanut butter": "🥜",
+  "orange juice": "🧃", juice: "🧃", "salad dressing (opened)": "🥗", mayo: "🥪", ketchup: "🍅", mustard: "🌭",
+  coffee: "☕", tea: "🍵", water: "💧", soda: "🥤", chocolate: "🍫", cookies: "🍪", chips: "🥔",
+};
+function groceryEmoji(name) {
+  const n = String(name || "").toLowerCase().trim();
+  if (!n) return "🍽️";
+  const key = Object.keys(GROCERY_EMOJI_DB).find((k) => n.includes(k) || k.includes(n));
+  return key ? GROCERY_EMOJI_DB[key] : "🍽️";
+}
+
 // ---- Budget categories ------------------------------------------------------
 const BUDGET_CATEGORIES = {
   regular: [
@@ -270,6 +294,8 @@ if (typeof module !== "undefined") {
     DEFAULT_HOUSEHOLD_ASSETS,
     DEFAULT_VEHICLE_TASKS,
     SHELF_LIFE_DB,
+    GROCERY_EMOJI_DB,
+    groceryEmoji,
     BUDGET_CATEGORIES,
     DEFAULT_TRAVEL_TEMPLATE,
     MINIMAL_ICON_SVGS,

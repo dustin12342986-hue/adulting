@@ -142,6 +142,7 @@ function currentBillingPeriodKey() {
 function defaultState() {
   return {
     version: 1,
+    updatedAt: 0, // ms timestamp of the last local change — used by drivesync.js to decide which device's copy is newer
     settings: {
       householdName: "Our Household", googleClientId: "", calendarConnected: false, defaultCalendarId: "primary",
       theme: "sunset", customHue: 18, iconStyle: "colorful",
