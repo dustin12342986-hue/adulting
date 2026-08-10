@@ -85,6 +85,14 @@ const Calendar = (function () {
 
   // Interactive connect (shows Google's consent popup). Call from a user
   // click handler — popups triggered outside a user gesture get blocked.
+  //
+  // Always forces prompt:"consent" (never silent), even if we already look
+  // "connected." This used to skip the consent screen entirely when a valid
+  // token already existed — which meant that after adding the drive.appdata
+  // scope, clicking "Reconnect" on an already-connected browser silently
+  // reused the OLD, narrower grant and never actually showed the user the
+  // new permission to approve. Explicit user clicks should always get a real
+  // consent screen; only the background ensureToken() path below stays silent.
   function connect() {
     return new Promise((resolve, reject) => {
       if (!tokenClient) return reject(new Error("Calendar not initialized yet — save your Client ID first."));
@@ -95,7 +103,7 @@ const Calendar = (function () {
         persistToken();
         resolve();
       };
-      tokenClient.requestAccessToken({ prompt: isConnected() ? "" : "consent" });
+      tokenClient.requestAccessToken({ prompt: "consent" });
     });
   }
 
