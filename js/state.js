@@ -49,6 +49,10 @@ function endOfMonthISO(date) {
 
 function currentPeriodInfo(recurrence, now) {
   now = now || new Date();
+  if (recurrence.type === "daily") {
+    const iso = now.toISOString().slice(0, 10);
+    return { key: iso, dueDate: iso };
+  }
   if (recurrence.type === "monthly") {
     return {
       key: now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0"),

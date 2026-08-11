@@ -112,6 +112,15 @@ function fmtRelativeDays(iso) {
   return Math.abs(d) + " days overdue";
 }
 
+// Small text helpers so "daily" reads naturally next to "weekly"/"monthly"
+// in the couple of places recurrence type gets turned into a sentence.
+function recurrenceAdverb(type) {
+  return type === "daily" ? "daily" : type === "monthly" ? "monthly" : "weekly";
+}
+function recurrenceCadencePhrase(type) {
+  return type === "daily" ? "for today" : type === "monthly" ? "for this month" : "for this week";
+}
+
 let driveSyncTimer = null;
 
 function persist() {
@@ -442,7 +451,7 @@ function collectStatusLights() {
   STATE.assets.forEach((a) => {
     lights.push({
       label: a.name,
-      sub: a.recurrence.type === "weekly" ? "Resets weekly" : "Resets monthly",
+      sub: a.recurrence.type === "daily" ? "Resets daily" : a.recurrence.type === "weekly" ? "Resets weekly" : "Resets monthly",
       status: (a.needsAttention && a.needsAttention.flag) ? "attention" : computeStatus(a.items),
     });
   });
@@ -647,7 +656,7 @@ function renderHousehold() {
         '<span class="card-icon">' + icon(a.key || "custom", 20) + '</span><span class="card-title">' + escapeHtml(a.name) + "</span>" +
         (a.needsAttention && a.needsAttention.flag ? '<span class="status-dot attention"></span>' : '<span class="status-dot ' + status + '"></span>') +
       "</div>" +
-      '<div class="muted small">' + a.recurrence.type + ' · resets ' + (a.recurrence.type === "weekly" ? "weekly" : "monthly") + " · due " + fmtDate(a.dueDate) + (overdue ? " · <span style=\"color:var(--attention)\">overdue</span>" : "") + "</div>" +
+      '<div class="muted small">' + a.recurrence.type + ' · resets ' + recurrenceAdverb(a.recurrence.type) + " · due " + fmtDate(a.dueDate) + (overdue ? " · <span style=\"color:var(--attention)\">overdue</span>" : "") + "</div>" +
       '<div class="progress-bar"><div style="width:' + (a.items.length ? (checkedN / a.items.length * 100) : 0) + '%"></div></div>' +
       (a.needsAttention && a.needsAttention.flag ? '<div class="attention-banner" style="margin:10px 0 0"><strong>Needs attention:</strong> ' + escapeHtml(a.needsAttention.note || "") + '<div style="margin-top:8px"><button class="btn-sm" data-action="clear-attention" data-domain="asset" data-id="' + a.id + '">Mark resolved</button></div></div>' : "") +
       (open ? renderAssetDetail(a) : "") +
@@ -665,10 +674,15 @@ function renderAssetDetail(a) {
     '<button class="btn-ghost btn-sm" data-action="remove-asset-item" data-id="' + a.id + '" data-index="' + idx + '" title="Remove item">✕</button></li>').join("");
   const status = computeStatus(a.items);
   return '<div class="hr"></div>' +
-    (status === "done" ? '<div class="reassure" style="margin-bottom:12px"><span class="icon">✅</span> All done here. Nothing left for ' + a.recurrence.type + '.</div>' : "") +
+    (status === "done" ? '<div class="reassure" style="margin-bottom:12px"><span class="icon">✅</span> All done here. Nothing left ' + recurrenceCadencePhrase(a.recurrence.type) + '.</div>' : "") +
     '<ul class="checklist">' + items + "</ul>" +
     '<form class="row" data-form="add-asset-item" data-id="' + a.id + '" style="margin-top:8px"><input type="text" name="text" placeholder="Add a checklist item" style="flex:1" /><button class="btn-sm" type="submit">Add</button></form>' +
     '<div class="hr"></div>' +
+    '<label class="row" style="margin-bottom:10px">How often <select data-action="change-asset-recurrence" data-id="' + a.id + '" style="margin-left:6px">' +
+      '<option value="daily"' + (a.recurrence.type === "daily" ? " selected" : "") + '>Daily</option>' +
+      '<option value="weekly"' + (a.recurrence.type === "weekly" ? " selected" : "") + '>Weekly</option>' +
+      '<option value="monthly"' + (a.recurrence.type === "monthly" ? " selected" : "") + '>Monthly</option>' +
+    "</select></label>" +
     '<label class="row"><input type="checkbox" data-action="asset-signal-up" data-id="' + a.id + '" ' + (a.signalUp ? "checked" : "") + ' style="width:18px;height:18px" /> I’m calling this fully caught up</label>' +
     '<div class="row" style="margin-top:10px;flex-wrap:wrap">' +
       '<button class="btn-sm btn-danger" data-action="open-attention-modal" data-domain="asset" data-id="' + a.id + '">🚩 Flag needs attention</button>' +
@@ -682,7 +696,7 @@ function openAddAssetModal() {
   openModal(
     '<h3>Add area</h3><form data-form="asset-template"><div class="field"><label>Start from a template</label><select name="templateIndex"><option value="-1">— Custom (blank) —</option>' + templates + "</select></div>" +
     '<div class="field"><label>Or name it yourself (used if Custom)</label><input type="text" name="customName" placeholder="e.g. Garage" /></div>' +
-    '<div class="field"><label>How often does it need doing?</label><select name="recurrence"><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></div>' +
+    '<div class="field"><label>How often does it need doing?</label><select name="recurrence"><option value="daily">Daily</option><option value="weekly" selected>Weekly</option><option value="monthly">Monthly</option></select></div>' +
     '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Add</button></div></form>'
   );
 }
@@ -736,9 +750,26 @@ function removeAssetItem(id, index) {
 function setAssetSignalUp(id, val) { findById(STATE.assets, id).signalUp = val; persist(); if (val) showPraise("signalUp"); }
 function deleteAsset(id) { STATE.assets = STATE.assets.filter((a) => a.id !== id); persist(); }
 
+// Switching an existing area's cadence (e.g. weekly -> daily) needs its
+// period recomputed right away, not just on the next natural rollover —
+// otherwise it'd keep showing this week's/month's stale due date and
+// checked state under the new cadence. refreshRecurringTask already resets
+// cleanly whenever currentPeriodKey doesn't match the freshly computed
+// period for the (now different) recurrence type, so forcing it stale
+// here is enough to make that happen immediately.
+function changeAssetRecurrence(id, type) {
+  const a = findById(STATE.assets, id);
+  if (!a || a.recurrence.type === type) return;
+  a.recurrence.type = type;
+  a.currentPeriodKey = null;
+  refreshRecurringTask(a);
+  persist();
+  toast("Now resets " + recurrenceAdverb(type) + ".");
+}
+
 async function syncAssetCalendar(id) {
   const a = findById(STATE.assets, id);
-  const rrule = a.recurrence.type === "weekly" ? "RRULE:FREQ=WEEKLY;BYDAY=SU" : "RRULE:FREQ=MONTHLY;BYMONTHDAY=" + new Date(a.dueDate + "T00:00:00").getDate();
+  const rrule = a.recurrence.type === "daily" ? "RRULE:FREQ=DAILY" : a.recurrence.type === "weekly" ? "RRULE:FREQ=WEEKLY;BYDAY=SU" : "RRULE:FREQ=MONTHLY;BYMONTHDAY=" + new Date(a.dueDate + "T00:00:00").getDate();
   const eventId = await syncToCalendar({ title: a.name + " checklist due", description: a.items.map((i) => "- " + i.text).join("\n"), dateISO: a.dueDate, rrule, kind: "household", refId: a.id, existingEventId: a.calendarEventId });
   if (eventId) { a.calendarEventId = eventId; persist(); }
 }
@@ -1572,6 +1603,7 @@ function handleChange(el) {
     case "focus-toggle-current": focusToggleCurrent(); break;
     case "toggle-auto-import": toggleAutoImport(el.checked); break;
     case "preview-hue": setCustomHue(el.value); break;
+    case "change-asset-recurrence": changeAssetRecurrence(id, el.value); break;
   }
 }
 
@@ -1685,7 +1717,7 @@ const AdultingActions = {
     const items = template ? template.items.map((text) => ({ text, checked: false })) : (Array.isArray(data.items) ? data.items.map((text) => ({ text, checked: false })) : []);
     const asset = {
       id: uid("asset"), name: data.name, icon: template ? template.icon : "🏷️", key: template ? template.key : "custom",
-      recurrence: { type: data.recurrence === "monthly" ? "monthly" : "weekly", interval: 1 },
+      recurrence: { type: data.recurrence === "monthly" ? "monthly" : data.recurrence === "daily" ? "daily" : "weekly", interval: 1 },
       items, currentPeriodKey: null, dueDate: null, signalUp: false, completedAt: null,
       needsAttention: { flag: false, note: "" }, calendarEventId: null,
     };

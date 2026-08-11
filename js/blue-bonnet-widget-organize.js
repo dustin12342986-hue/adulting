@@ -283,10 +283,10 @@ BUDGET / BILLS
   it reflects what the user told it.
 
 HOUSEHOLD CHORES / MAINTENANCE
-- Weekly vs. monthly recurrence should roughly match how quickly a space
-  actually gets messy again — kitchens/bathrooms weekly, HVAC filters and
-  yard/exterior monthly-or-less is a reasonable rule of thumb, not
-  arbitrary.
+- Daily vs. weekly vs. monthly recurrence should roughly match how quickly a
+  space actually gets messy again — daily for things like litter boxes,
+  dishes, or tidying a living room; weekly for kitchens/bathrooms; monthly-
+  or-less for HVAC filters and yard/exterior. Not arbitrary.
 - A "needs attention" flag is intentionally separate from "not yet
   checked off" — one is "I haven't gotten to it," the other is "something
   is actually wrong here" (a leak, something broken). Don't conflate them
@@ -381,7 +381,7 @@ specifics you weren't given.
       billName: { type: "string" },
     }, required: ["billName"] } },
     { name: "add_household_area", description: "Add a new household area/room with a checklist. templateKey can be one of: kitchen, bathroom, livingroom, bedroom, laundry, hvac, safety, yard (uses that area's standard checklist); omit for a blank custom area (optionally provide items).", input_schema: { type: "object", properties: {
-      name: { type: "string" }, templateKey: { type: "string" }, recurrence: { type: "string", enum: ["weekly", "monthly"] },
+      name: { type: "string" }, templateKey: { type: "string" }, recurrence: { type: "string", enum: ["daily", "weekly", "monthly"] },
       items: { type: "array", items: { type: "string" } },
     }, required: ["name"] } },
     { name: "check_household_item", description: "Check off one checklist item in a household area.", input_schema: { type: "object", properties: {
