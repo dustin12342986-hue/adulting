@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Adulting</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23F6A6C1'/%3E%3Ccircle cx='32' cy='26' r='12' fill='%23FFD873'/%3E%3Cpath d='M0 44 Q16 36 32 44 T64 44 V64 H0 Z' fill='%235B9BB8'/%3E%3Cpath d='M0 50 Q16 44 32 50 T64 50 V64 H0 Z' fill='%234A86A3'/%3E%3C/svg%3E" />
+<!-- PWA install support: manifest + icons + theme color. Same minimal
+     pattern used across this app ecosystem so install behavior and
+     branding stay consistent app to app. -->
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="theme-color" content="#ff8b6b">
+<link rel="stylesheet" href="css/style.css?v=20260810d" />
+</head>
+<body>
+<div id="demoBanner" style="display:none"></div>
+<div id="appShell">
+  <header class="hero-banner" id="heroBanner"><!-- rendered by app.js: sunset/beach illustration --></header>
+  <div id="app">
+    <nav class="sidebar" id="sidebar"></nav>
+    <main id="main"><!-- rendered by app.js --></main>
+  </div>
+</div>
+
+<div id="boardRoot" style="display:none"><!-- standalone status-light board view --></div>
+<div id="onboardingRoot"><!-- first-run welcome / Google connect --></div>
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+<div id="praiseRoot"></div>
+
+<!--
+  Cache-busting: GitHub Pages serves these files with ~10 minutes of cache,
+  and a normal page reload does NOT re-fetch already-cached sub-resources
+  like these scripts even if the page itself loads fresh — only a hard
+  refresh does. That caused real, confusing bugs this session where a newly
+  uploaded fix was live on GitHub but browsers kept running the old script
+  for up to 10 minutes (or longer, if not hard-refreshed). Bump the ?v=
+  number below whenever any of these files change, so browsers always treat
+  an update as a brand new URL and fetch it immediately instead of reusing
+  a stale cached copy.
+-->
+<script src="js/data.js?v=20260810d"></script>
+<script src="js/state.js?v=20260810d"></script>
+<script src="js/calendar.js?v=20260810d"></script>
+<script src="js/drivesync.js?v=20260810d"></script>
+<script src="js/app.js?v=20260810d"></script>
+<script src="js/blue-bonnet-widget-organize.js?v=20260810d"></script>
+</body>
+</html>
