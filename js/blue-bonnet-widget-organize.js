@@ -302,6 +302,15 @@ BANK STATEMENTS
 - Statements are parsed in the browser. The FILE is never stored — only the
   parsed rows — and account/card numbers are masked to the last 4 digits
   before saving, including on the log_transactions path.
+- The user can attach files to this chat with the paperclip. PDFs and CSVs
+  arrive as text labelled "Attached file: <name>". Photos and screenshots
+  arrive as images you can actually look at — a phone photo of a receipt or a
+  screenshot of an Affirm plan is a normal thing to receive here.
+- When something is attached, read it and call the right tool without being
+  asked twice: log_transactions for statements, add_payment_plan for a BNPL
+  confirmation, add_bill for a recurring bill. Say plainly what you logged.
+- A photo may be blurry or cut off. Log the rows you can read clearly and say
+  which ones you couldn't, rather than guessing at a number.
 - Amounts are negative for money out, positive for money in. Statements write
   negatives inconsistently: -42.10, (42.10), or a separate Debit column.
 - When reading a pasted statement, skip lines you can't read confidently
@@ -644,7 +653,13 @@ specifics you weren't given.
     </div>
     <div id="bb-chips"></div>
     <div id="bb-inputrow">
-      <input id="bb-input" type="text" placeholder="Ask the organizing assistant..." />
+      <label id="bb-attach" title="Attach a statement, receipt or screenshot" style="cursor:pointer;display:flex;align-items:center;padding:0 6px;opacity:0.75">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+        </svg>
+        <input type="file" id="bb-file" accept=".pdf,.csv,.txt,.tsv,image/*" multiple style="display:none" />
+      </label>
+      <input id="bb-input" type="text" placeholder="Ask, or attach a statement..." />
       <button id="bb-send" aria-label="Send">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -682,6 +697,117 @@ specifics you weren't given.
       ? `<svg viewBox="0 0 24 24" stroke="#E8EAED" fill="none" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
       : `<img src="${LOGO_SRC}" alt="Blue Bonnet"/>`;
   };
+
+  /* ------------------------------------------------------------------------
+     Attachments
+
+     Three kinds, handled differently:
+       PDF        -> text is extracted in the browser (app.js's extractPdfText)
+                     and sent as text. Sending a whole PDF as an image would be
+                     slower, pricier, and less accurate than the real text.
+       CSV / text -> read directly.
+       Images     -> sent as an actual image block so Blue Bonnet can look at
+                     them. This is what makes a photo of a receipt or a
+                     screenshot of an Affirm plan work.
+
+     Nothing is uploaded anywhere except the assistant call itself, which goes
+     through the user's own Cloudflare Worker.
+     ------------------------------------------------------------------------ */
+  let pendingAttachments = []; // { kind:"text"|"image", name, text?, media?, data? }
+
+  const fileEl = panel.querySelector("#bb-file");
+  const attachEl = panel.querySelector("#bb-attach");
+
+  function renderAttachChips() {
+    let bar = panel.querySelector("#bb-attachbar");
+    if (!pendingAttachments.length) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "bb-attachbar";
+      bar.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;padding:6px 10px;font-size:11px";
+      panel.querySelector("#bb-inputrow").before(bar);
+    }
+    bar.innerHTML = pendingAttachments.map((a, i) =>
+      `<span style="background:rgba(120,160,200,0.18);border-radius:10px;padding:3px 8px;display:inline-flex;gap:6px;align-items:center">
+         ${a.kind === "image" ? "🖼" : "📄"} ${escapeHtmlBB(a.name)}
+         <button data-rm="${i}" style="background:none;border:none;color:inherit;cursor:pointer;font-size:12px;line-height:1">✕</button>
+       </span>`).join("");
+    bar.querySelectorAll("[data-rm]").forEach((b) => {
+      b.onclick = () => { pendingAttachments.splice(Number(b.dataset.rm), 1); renderAttachChips(); };
+    });
+  }
+
+  function escapeHtmlBB(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  async function addAttachment(file) {
+    const isImage = /^image\//.test(file.type);
+    const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+
+    if (isImage) {
+      // Anthropic accepts base64 image blocks; keep it under a sane size.
+      if (file.size > 4 * 1024 * 1024) {
+        alert("That image is over 4MB — try a smaller one or a screenshot.");
+        return;
+      }
+      const data = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(String(r.result).split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+      pendingAttachments.push({ kind: "image", name: file.name, media: file.type, data });
+      renderAttachChips();
+      return;
+    }
+
+    if (isPdf) {
+      if (typeof extractPdfText !== "function") {
+        alert("PDF reading isn't available — try the CSV export instead.");
+        return;
+      }
+      const buf = await file.arrayBuffer();
+      const text = await extractPdfText(buf);
+      if (!text.trim()) {
+        alert("That PDF has no readable text — it's probably a scan. Attach it as an image instead and I'll read it.");
+        return;
+      }
+      pendingAttachments.push({ kind: "text", name: file.name, text });
+      renderAttachChips();
+      return;
+    }
+
+    const text = await file.text();
+    pendingAttachments.push({ kind: "text", name: file.name, text });
+    renderAttachChips();
+  }
+
+  fileEl.addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    for (const f of files) {
+      try { await addAttachment(f); }
+      catch (err) { console.error(err); alert("Couldn't read " + f.name + ": " + err.message); }
+    }
+    if (pendingAttachments.length && !inputEl.value.trim()) {
+      inputEl.value = "Log these transactions";
+      sendEl.classList.add("bb-active");
+    }
+  });
+
+  // Drag a file straight onto the chat panel
+  ["dragover", "drop"].forEach((evt) => {
+    panel.addEventListener(evt, async (e) => {
+      e.preventDefault();
+      if (evt !== "drop") return;
+      const files = Array.from(e.dataTransfer.files || []);
+      for (const f of files) {
+        try { await addAttachment(f); } catch (err) { console.error(err); }
+      }
+    });
+  });
 
   inputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter") sendMessage();
@@ -762,15 +888,44 @@ specifics you weren't given.
     const content = checkInMode
       ? "(automatic check-in \u2014 the user did not send this, you are initiating)"
       : (preset !== undefined ? preset : inputEl.value).trim();
-    if (!checkInMode && !content) return;
+    const attachments = checkInMode ? [] : pendingAttachments.slice();
+    if (!checkInMode && !content && !attachments.length) return;
 
     if (!checkInMode) {
       if (chipsEl.parentNode) chipsEl.remove();
       inputEl.value = "";
       sendEl.classList.remove("bb-active");
-      renderMessage("user", content);
+      pendingAttachments = [];
+      renderAttachChips();
+      renderMessage("user", content + (attachments.length
+        ? "\n" + attachments.map((a) => (a.kind === "image" ? "🖼 " : "📄 ") + a.name).join("\n")
+        : ""));
     }
-    messages.push({ role: "user", content });
+
+    /* Build the API content. Plain string when there's nothing attached (keeps
+       the common case simple); a content-block array when there is, since
+       images have to be blocks. Text extracted from a PDF/CSV is labelled with
+       its filename so the assistant knows what it's looking at. */
+    let apiContent = content;
+    if (attachments.length) {
+      apiContent = [];
+      attachments.forEach((a) => {
+        if (a.kind === "image") {
+          apiContent.push({
+            type: "image",
+            source: { type: "base64", media_type: a.media, data: a.data },
+          });
+        } else {
+          apiContent.push({
+            type: "text",
+            text: "Attached file: " + a.name + "\n-----\n" + a.text.slice(0, 60000) + "\n-----",
+          });
+        }
+      });
+      apiContent.push({ type: "text", text: content || "Read this and log whatever belongs in the app." });
+    }
+
+    messages.push({ role: "user", content: apiContent });
     setLoading(true);
 
     const loadingRow = document.createElement("div");

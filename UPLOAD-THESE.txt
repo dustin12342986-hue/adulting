@@ -1,32 +1,29 @@
-ADULTING — BUDGET UPDATE (payment plans + bank statements)
+ADULTING — BUDGET UPDATE v2  (PDF statements + Blue Bonnet attachments)
 
 Upload these 4 files to  github.com/dustin12342986-hue/adulting
 keeping the same folder structure:
 
-  index.html                            -> repo root        (2,450 bytes)
-  js/app.js                             -> js/ folder     (141,966 bytes)
-  js/state.js                           -> js/ folder       (9,599 bytes)
-  js/blue-bonnet-widget-organize.js     -> js/ folder     (106,100 bytes)
+  index.html                          -> repo root         (2,450 bytes)
+  js/app.js                           -> js/ folder      (146,109 bytes)
+  js/state.js                         -> js/ folder        (9,599 bytes)
+  js/blue-bonnet-widget-organize.js   -> js/ folder      (113,028 bytes)
 
-HOW TO TELL YOU HAVE THE RIGHT ONES
-  index.html  ... contains  v=20260814a       (old version says v=20260810)
-  state.js    ... contains  bnplPlans         (old version has no such word)
-  app.js      ... contains  renderBnplSection
-  blue-bonnet ... contains  add_payment_plan
+CHECK YOU HAVE THE RIGHT ONES  (search inside each file)
+  index.html  ... v=20260815a
+  app.js      ... extractPdfText
+  state.js    ... bnplPlans
+  blue-bonnet ... bb-attach
 
-WHAT WENT WRONG LAST TIME
-  The copy that landed on GitHub was an OLDER build: index.html was back to
-  v=20260810 with no PWA tags, and state.js had lost both the new budget data
-  and the daily-recurrence feature. Most likely an older download got picked
-  up. Deleting old copies from your Downloads folder first avoids a repeat.
+NEW IN THIS ROUND
+  PDF statements       Budget -> Statements -> "Upload statement" now takes
+                       PDFs straight from your bank. Read in your browser
+                       with pdf.js; the file is never uploaded or stored.
+  Blue Bonnet uploads  Paperclip in the chat. Attach PDFs, CSVs, photos and
+                       screenshots, or just drag them onto the panel. Photos
+                       go as real images so it can look at them.
+  Fallback             If a PDF layout isn't recognized, the extracted text
+                       opens in the paste box so nothing dead-ends.
 
-WHAT'S NEW
-  Budget tab -> Payment plans   Affirm/Klarna/Afterpay/PayPal links, plan
-                                tracking, computed upcoming charges
-  Budget tab -> Statements      CSV upload or paste; parsed in your browser,
-                                file never stored, account numbers masked
-  Blue Bonnet                   Can read a pasted confirmation email or
-                                statement and create the entries for you
-  Dashboard                     Upcoming installments listed with your bills
-
-Existing bills, chores, groceries, vehicles and trips are untouched.
+SCANNED PDFs
+  A PDF that's only a picture of paper has no text to pull out. Attach it to
+  Blue Bonnet as an image instead and it'll read it that way.

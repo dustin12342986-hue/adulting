@@ -675,14 +675,14 @@ function renderStatementSection() {
   const inflow = txns.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
 
   return '<h2 style="margin:28px 0 6px">Statements</h2>' +
-    '<p class="page-sub">Upload a CSV from your bank, or paste the text of a statement. It\'s read here in your browser — the file itself is never saved, only the transactions, and account numbers are masked to the last 4 digits.</p>' +
+    '<p class="page-sub">Upload a statement PDF or CSV straight from your bank. It\'s read here in your browser — the file itself is never saved, only the transactions, and account numbers are masked to the last 4 digits.</p>' +
     '<div class="card" style="margin-bottom:12px">' +
       '<div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">' +
-        '<label class="btn-primary" style="cursor:pointer">📄 Upload CSV<input type="file" accept=".csv,.txt,.tsv" id="statementFile" style="display:none" /></label>' +
-        '<button class="btn-sm" data-action="open-statement-paste">📋 Paste statement text</button>' +
+        '<label class="btn-primary" style="cursor:pointer">📄 Upload statement<input type="file" accept=".pdf,.csv,.txt,.tsv" id="statementFile" style="display:none" /></label>' +
+        '<button class="btn-sm" data-action="open-statement-paste">📋 Paste text instead</button>' +
         (txns.length ? '<button class="btn-sm btn-danger" data-action="clear-statement-txns">Clear all transactions</button>' : "") +
       "</div>" +
-      '<div class="hint muted small">PDF statements: open the PDF, select all the text, copy it, and use “Paste statement text”. Blue Bonnet can also read a pasted statement and log it for you.</div>' +
+      '<div class="hint muted small">PDF and CSV both work. Scanned/photographed statements have no text to read — use your bank\'s CSV export for those. If the layout is unusual, Blue Bonnet can read a pasted statement and log it for you.</div>' +
     "</div>" +
     (txns.length
       ? '<div class="grid" style="margin-bottom:12px">' +
@@ -799,6 +799,92 @@ function normalizeDate(s) {
   return yy + "-" + mm + "-" + dd;
 }
 
+/* ---------------------------------------------------------------------------
+   PDF statements
+
+   Banks hand out PDFs far more than CSVs, so reading them directly matters.
+   pdf.js does the work entirely in the browser — the file is still never
+   uploaded anywhere, it just gets parsed here like a CSV would be.
+
+   Loaded from a CDN only when a PDF is actually picked, so people who never
+   touch a PDF don't pay for the download.
+   --------------------------------------------------------------------------- */
+const PDFJS_SRC = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+const PDFJS_WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+let pdfJsLoading = null;
+
+function loadPdfJs() {
+  if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+  if (pdfJsLoading) return pdfJsLoading;
+  pdfJsLoading = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = PDFJS_SRC;
+    s.onload = () => {
+      if (!window.pdfjsLib) return reject(new Error("PDF reader failed to load."));
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+      resolve(window.pdfjsLib);
+    };
+    s.onerror = () => reject(new Error("Couldn't load the PDF reader (check your internet connection)."));
+    document.head.appendChild(s);
+  });
+  return pdfJsLoading;
+}
+
+/* Pull text out of a PDF, rebuilding visual lines.
+
+   pdf.js returns loose text fragments with coordinates, not lines — printing
+   them in order gives one long run-on string that no transaction pattern can
+   match. So group fragments by their Y position (with a small tolerance, since
+   characters on one line rarely share an exact Y), sort each group left to
+   right, and join. That restores rows like:
+     08/12/2026   STARBUCKS #123   -5.75 */
+async function extractPdfText(arrayBuffer) {
+  const pdfjsLib = await loadPdfJs();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const lines = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const rows = new Map();
+    content.items.forEach((item) => {
+      if (!item.str || !item.str.trim()) return;
+      const y = Math.round(item.transform[5]);        // vertical position
+      const key = Math.round(y / 3);                  // 3pt tolerance per line
+      if (!rows.has(key)) rows.set(key, []);
+      rows.get(key).push({ x: item.transform[4], str: item.str });
+    });
+    // Descending Y = top of page down
+    Array.from(rows.keys()).sort((a, b) => b - a).forEach((k) => {
+      const line = rows.get(k).sort((a, b) => a.x - b.x).map((i) => i.str).join(" ")
+        .replace(/\s+/g, " ").trim();
+      if (line) lines.push(line);
+    });
+  }
+  return lines.join("\n");
+}
+
+async function importStatementPdf(file) {
+  toast("Reading " + file.name + "…");
+  try {
+    const buf = await file.arrayBuffer();
+    const text = await extractPdfText(buf);
+    if (!text.trim()) {
+      toast("That PDF has no readable text — it's probably a scan. Try your bank's CSV export instead.");
+      return;
+    }
+    const added = importStatementText(text, file.name);
+    if (!added) {
+      // Text came out but nothing matched the transaction patterns. Rather than
+      // dead-end, hand the extracted text to the user so Blue Bonnet can read it.
+      openStatementPasteModal(text);
+      toast("Couldn't auto-detect the rows — here's the text, ask Blue Bonnet to log it.");
+    }
+  } catch (e) {
+    console.error(e);
+    toast("Couldn't read that PDF (" + e.message + "). Try the CSV export, or copy the text and paste it.");
+  }
+}
+
 function importStatementText(text, label) {
   const rows = parseStatementText(text);
   if (!rows.length) {
@@ -818,12 +904,14 @@ function importStatementText(text, label) {
   return fresh.length;
 }
 
-function openStatementPasteModal() {
+function openStatementPasteModal(prefill) {
   openModal(
     "<h3>Paste statement text</h3>" +
-    '<p class="muted small">Copy the transactions out of your statement (or a PDF) and paste them here. Account numbers are masked automatically before anything is saved.</p>' +
+    '<p class="muted small">' + (prefill
+      ? "This is the text pulled out of your PDF. The rows didn't match a pattern the app recognizes, so either edit it down to the transaction lines and import, or copy it into Blue Bonnet and ask it to log them."
+      : "Copy the transactions out of your statement and paste them here. Account numbers are masked automatically before anything is saved.") + "</p>" +
     '<form data-form="statement-paste">' +
-      '<div class="field"><label>Statement text</label><textarea name="text" rows="12" placeholder="08/12/2026   STARBUCKS #123   -5.75" style="width:100%;font-family:monospace;font-size:12px"></textarea></div>' +
+      '<div class="field"><label>Statement text</label><textarea name="text" rows="12" placeholder="08/12/2026   STARBUCKS #123   -5.75" style="width:100%;font-family:monospace;font-size:12px">' + escapeHtml(prefill || "") + "</textarea></div>" +
       '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Import</button></div>' +
     "</form>"
   );
@@ -1999,10 +2087,14 @@ function wireEvents() {
     // parsed, masked transactions are ever saved.
     if (e.target.id === "statementFile" && e.target.files[0]) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = () => { importStatementText(reader.result, file.name); };
-      reader.onerror = () => toast("Couldn't read that file.");
-      reader.readAsText(file);
+      if (/\.pdf$/i.test(file.name) || file.type === "application/pdf") {
+        importStatementPdf(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => { importStatementText(reader.result, file.name); };
+        reader.onerror = () => toast("Couldn't read that file.");
+        reader.readAsText(file);
+      }
       e.target.value = ""; // let the same file be picked again later
     }
   });
