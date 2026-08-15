@@ -161,7 +161,56 @@ function defaultState() {
     groceries: [],
     vehicles: [],
     trips: [],
+
+    // Buy-now-pay-later plans (Affirm, Klarna, Afterpay, etc.).
+    // We can't log into those services — no public personal API, and storing
+    // banking passwords in a static site is not something worth doing. But a
+    // payment plan is a FIXED schedule, so once the terms are recorded the app
+    // can compute every future charge itself with no login at all.
+    bnplPlans: [],
+
+    // Transactions pulled out of an uploaded/pasted statement. The statement
+    // FILE is never stored — only the parsed lines, with account and card
+    // numbers masked to the last 4 digits (see maskSensitive in app.js).
+    statementTxns: [],
+    statementImports: [], // { id, label, source, count, importedAt }
   };
+}
+
+// Payment schedule for a BNPL plan, computed from its fixed terms.
+// Returns upcoming (unpaid, future-or-today) charges, soonest first.
+function bnplUpcomingCharges(plan, todayIso) {
+  const today = todayIso || todayISO();
+  const out = [];
+  if (!plan || !plan.nextDueDate || !plan.paymentsRemaining) return out;
+  const every = Number(plan.everyDays) || 14; // Affirm/Klarna default: every 2 weeks
+  let date = plan.nextDueDate;
+  for (let i = 0; i < Number(plan.paymentsRemaining); i++) {
+    if (date >= today) {
+      out.push({
+        planId: plan.id,
+        service: plan.service,
+        merchant: plan.merchant,
+        amount: Number(plan.paymentAmount) || 0,
+        dueDate: date,
+      });
+    }
+    date = addDaysISO(date, every);
+  }
+  return out;
+}
+
+// Every upcoming BNPL charge across all plans, soonest first.
+function allUpcomingBnplCharges(state, withinDays) {
+  const today = todayISO();
+  const limit = withinDays ? addDaysISO(today, withinDays) : null;
+  const all = [];
+  (state.bnplPlans || []).forEach((p) => {
+    bnplUpcomingCharges(p, today).forEach((c) => {
+      if (!limit || c.dueDate <= limit) all.push(c);
+    });
+  });
+  return all.sort((a, b) => (a.dueDate < b.dueDate ? -1 : 1));
 }
 
 function loadState() {
@@ -170,6 +219,11 @@ function loadState() {
     if (!raw) return defaultState();
     const parsed = JSON.parse(raw);
     const merged = Object.assign(defaultState(), parsed);
+    // Arrays added in later versions won't exist in older saved states, and
+    // Object.assign copies `undefined` right over the default. Backfill them
+    // so existing users don't hit "cannot read length of undefined".
+    ["bills","assets","groceries","vehicles","trips","bnplPlans","statementTxns","statementImports"]
+      .forEach((k) => { if (!Array.isArray(merged[k])) merged[k] = []; });
     // settings is merged one level deep so new default fields (added in later
     // versions of the app) show up for people with an existing saved state.
     merged.settings = Object.assign(defaultState().settings, parsed.settings || {});
@@ -197,5 +251,6 @@ if (typeof module !== "undefined") {
     refreshRecurringTask, isTaskOverdue, vehicleTaskStatus, groceryStatus,
     tripProgress, billDueDateThisPeriod, currentBillingPeriodKey,
     defaultState, loadState, saveState, STORAGE_KEY,
+    bnplUpcomingCharges, allUpcomingBnplCharges,
   };
 }

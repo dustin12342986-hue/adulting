@@ -282,6 +282,34 @@ BUDGET / BILLS
   the app "knows" something was paid just because it's marked as such;
   it reflects what the user told it.
 
+PAYMENT PLANS (AFFIRM / KLARNA / AFTERPAY / PAYPAL PAY IN 4)
+- The app CANNOT sign into these services. They have no public personal API,
+  and storing banking credentials in a static site would be a bad trade. Be
+  straightforward about that if asked — don't imply a live connection exists.
+- What works instead: the payments are a FIXED schedule, so once the terms are
+  recorded the app computes every future charge itself, no login needed.
+- The intended flow is paste-and-parse. When someone pastes a confirmation
+  email or plan summary, read it and call add_payment_plan. Watch for the
+  distinction between the TOTAL purchase price and the PER-INSTALLMENT amount —
+  paymentAmount is per installment. Biweekly (everyDays 14) is the norm.
+- If a date or amount genuinely isn't in the pasted text, ask. Don't guess at
+  money or due dates; a wrong number here means a missed or surprise payment.
+- These plans are easy to lose track of precisely because they're small and
+  automatic. Surfacing "you have $X of installments due in the next 30 days"
+  is often more useful than the individual line items.
+
+BANK STATEMENTS
+- Statements are parsed in the browser. The FILE is never stored — only the
+  parsed rows — and account/card numbers are masked to the last 4 digits
+  before saving, including on the log_transactions path.
+- Amounts are negative for money out, positive for money in. Statements write
+  negatives inconsistently: -42.10, (42.10), or a separate Debit column.
+- When reading a pasted statement, skip lines you can't read confidently
+  rather than guessing. A missing transaction is recoverable; a wrong one
+  quietly corrupts the totals.
+- Don't offer opinions on someone's spending unless they ask. Logging what
+  happened and commenting on it are different jobs.
+
 HOUSEHOLD CHORES / MAINTENANCE
 - Daily vs. weekly vs. monthly recurrence should roughly match how quickly a
   space actually gets messy again — daily for things like litter boxes,
@@ -380,6 +408,30 @@ specifics you weren't given.
     { name: "mark_bill_paid", description: "Mark a bill as paid for the current billing period.", input_schema: { type: "object", properties: {
       billName: { type: "string" },
     }, required: ["billName"] } },
+    /* Buy-now-pay-later. The app can't sign into Affirm/Klarna (no personal
+       API, and credentials don't belong in a static site), so the flow is:
+       the user pastes a confirmation email, and these tools turn it into a
+       schedule the app can compute future charges from. */
+    { name: "add_payment_plan", description: "Add a buy-now-pay-later payment plan (Affirm, Klarna, Afterpay, PayPal Pay in 4). Use this when the user pastes a confirmation email or describes a plan. Work out paymentAmount, paymentsRemaining, everyDays (14 = every two weeks, the usual) and nextDueDate from what they paste. If a detail genuinely isn't in the text, ask rather than guessing at money or dates.", input_schema: { type: "object", properties: {
+      service: { type: "string", enum: ["affirm", "klarna", "afterpay", "paypal4", "other"] },
+      merchant: { type: "string", description: "What was bought / who from" },
+      paymentAmount: { type: "number", description: "Amount of EACH installment, not the total" },
+      paymentsRemaining: { type: "integer" },
+      everyDays: { type: "integer", description: "Days between payments: 14 biweekly, 30 monthly, 7 weekly" },
+      nextDueDate: { type: "string", description: "YYYY-MM-DD" },
+      notes: { type: "string" },
+    }, required: ["merchant", "paymentAmount"] } },
+    { name: "mark_payment_plan_paid", description: "Record that one installment of a payment plan has cleared. Decrements payments remaining and rolls the due date forward.", input_schema: { type: "object", properties: {
+      merchant: { type: "string", description: "Merchant name, fuzzy match is fine" },
+    }, required: ["merchant"] } },
+    { name: "log_transactions", description: "Log transactions the user pasted from a bank statement. Read the pasted text, pull out each transaction, and pass them as an array. Amounts are NEGATIVE for money out and positive for money in. Never invent a transaction that isn't in the text; skip lines you can't read confidently. Account numbers are masked automatically on save.", input_schema: { type: "object", properties: {
+      label: { type: "string", description: "e.g. 'Chase checking, August'" },
+      transactions: { type: "array", items: { type: "object", properties: {
+        date: { type: "string", description: "YYYY-MM-DD" },
+        description: { type: "string" },
+        amount: { type: "number", description: "Negative = money out" },
+      }, required: ["date", "description", "amount"] } },
+    }, required: ["transactions"] } },
     { name: "add_household_area", description: "Add a new household area/room with a checklist. templateKey can be one of: kitchen, bathroom, livingroom, bedroom, laundry, hvac, safety, yard (uses that area's standard checklist); omit for a blank custom area (optionally provide items).", input_schema: { type: "object", properties: {
       name: { type: "string" }, templateKey: { type: "string" }, recurrence: { type: "string", enum: ["daily", "weekly", "monthly"] },
       items: { type: "array", items: { type: "string" } },
@@ -429,6 +481,9 @@ specifics you weren't given.
   const TOOL_HANDLERS = {
     add_bill: (i) => window.AdultingActions.addBill(i),
     mark_bill_paid: (i) => window.AdultingActions.markBillPaid(i),
+    add_payment_plan: (i) => window.AdultingActions.addPaymentPlan(i),
+    mark_payment_plan_paid: (i) => window.AdultingActions.markPaymentPlanPaid(i),
+    log_transactions: (i) => window.AdultingActions.logTransactions(i),
     add_household_area: (i) => window.AdultingActions.addHouseholdArea(i),
     check_household_item: (i) => window.AdultingActions.checkHouseholdItem(i),
     signal_area_caught_up: (i) => window.AdultingActions.signalAreaCaughtUp(i),

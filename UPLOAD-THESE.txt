@@ -1,0 +1,32 @@
+ADULTING — BUDGET UPDATE (payment plans + bank statements)
+
+Upload these 4 files to  github.com/dustin12342986-hue/adulting
+keeping the same folder structure:
+
+  index.html                            -> repo root        (2,450 bytes)
+  js/app.js                             -> js/ folder     (141,966 bytes)
+  js/state.js                           -> js/ folder       (9,599 bytes)
+  js/blue-bonnet-widget-organize.js     -> js/ folder     (106,100 bytes)
+
+HOW TO TELL YOU HAVE THE RIGHT ONES
+  index.html  ... contains  v=20260814a       (old version says v=20260810)
+  state.js    ... contains  bnplPlans         (old version has no such word)
+  app.js      ... contains  renderBnplSection
+  blue-bonnet ... contains  add_payment_plan
+
+WHAT WENT WRONG LAST TIME
+  The copy that landed on GitHub was an OLDER build: index.html was back to
+  v=20260810 with no PWA tags, and state.js had lost both the new budget data
+  and the daily-recurrence feature. Most likely an older download got picked
+  up. Deleting old copies from your Downloads folder first avoids a repeat.
+
+WHAT'S NEW
+  Budget tab -> Payment plans   Affirm/Klarna/Afterpay/PayPal links, plan
+                                tracking, computed upcoming charges
+  Budget tab -> Statements      CSV upload or paste; parsed in your browser,
+                                file never stored, account numbers masked
+  Blue Bonnet                   Can read a pasted confirmation email or
+                                statement and create the entries for you
+  Dashboard                     Upcoming installments listed with your bills
+
+Existing bills, chores, groceries, vehicles and trips are untouched.

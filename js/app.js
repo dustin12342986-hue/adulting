@@ -519,6 +519,11 @@ function collectTodayItems() {
     const paid = (b.paidPeriods || {})[currentBillingPeriodKey()];
     if (!paid && due <= horizon) items.push({ icon: "💰", label: b.name + " (" + fmtMoney(b.amount) + ")", when: fmtRelativeDays(due) });
   });
+  // BNPL installments land in the same "what's coming" list as bills — they're
+  // money leaving the account on a date, which is what this list is for.
+  allUpcomingBnplCharges(STATE, 7).forEach((c) => {
+    items.push({ icon: "🧾", label: c.merchant + " (" + fmtMoney(c.amount) + ", " + bnplServiceName(c.service) + ")", when: fmtRelativeDays(c.dueDate) });
+  });
   STATE.vehicles.forEach((v) => (v.tasks || []).forEach((t) => {
     const s = vehicleTaskStatus(t, v);
     if (s.overdue || s.dueSoon) items.push({ icon: "🚗", label: v.name + " — " + t.title, when: s.overdue ? "overdue" : (t.dueDate ? fmtRelativeDays(t.dueDate) : "due soon (mileage)") });
@@ -574,7 +579,296 @@ function renderBudget() {
     (STATE.bills.length
       ? '<div class="card"><table><thead><tr><th>Name</th><th>Type</th><th>Category</th><th>Amount</th><th>Due</th><th></th></tr></thead><tbody>' +
         STATE.bills.slice().sort((a, b) => (a.dueDay || 1) - (b.dueDay || 1)).map(billRow).join("") + "</tbody></table></div>"
-      : emptyState("💰", "No bills yet", "Add rent, utilities, subscriptions — anything that repeats each month."));
+      : emptyState("💰", "No bills yet", "Add rent, utilities, subscriptions — anything that repeats each month.")) +
+    renderBnplSection() +
+    renderStatementSection();
+}
+
+// ---------------------------------------------------------------------------
+// Buy now, pay later (Affirm / Klarna / Afterpay / PayPal Pay in 4)
+//
+// These services have no public personal API, so the app cannot log in and
+// read balances — and putting banking credentials in a static site hosted on
+// GitHub is not a trade worth making. What it CAN do is better than it sounds:
+// a payment plan is a fixed schedule, so once the terms are recorded once, the
+// app computes every future charge with no login at all.
+//
+// Blue Bonnet does the data entry: paste a confirmation email or plan page and
+// it fills in merchant, amount, and schedule for you.
+// ---------------------------------------------------------------------------
+const BNPL_SERVICES = [
+  { id: "affirm",   name: "Affirm",   url: "https://www.affirm.com/dashboard",     emoji: "🟣" },
+  { id: "klarna",   name: "Klarna",   url: "https://app.klarna.com/",              emoji: "🩷" },
+  { id: "afterpay", name: "Afterpay", url: "https://portal.afterpay.com/",         emoji: "🌿" },
+  { id: "paypal4",  name: "PayPal",   url: "https://www.paypal.com/myaccount/pay-later/", emoji: "🔵" },
+];
+
+function bnplServiceName(id) {
+  const s = BNPL_SERVICES.find((x) => x.id === id);
+  return s ? s.name : (id || "Other");
+}
+
+function renderBnplSection() {
+  const plans = STATE.bnplPlans || [];
+  const upcoming = allUpcomingBnplCharges(STATE, 60);
+  const totalOwed = plans.reduce((s, p) => s + (Number(p.paymentAmount) || 0) * (Number(p.paymentsRemaining) || 0), 0);
+  const next30 = allUpcomingBnplCharges(STATE, 30).reduce((s, c) => s + c.amount, 0);
+
+  function planRow(p) {
+    const next = bnplUpcomingCharges(p)[0];
+    const remaining = (Number(p.paymentAmount) || 0) * (Number(p.paymentsRemaining) || 0);
+    return "<tr>" +
+      "<td><strong>" + escapeHtml(p.merchant || "(no merchant)") + "</strong><div class=\"muted small\">" + escapeHtml(bnplServiceName(p.service)) + "</div></td>" +
+      "<td>" + fmtMoney(p.paymentAmount) + "<div class=\"muted small\">every " + (Number(p.everyDays) || 14) + " days</div></td>" +
+      "<td>" + (Number(p.paymentsRemaining) || 0) + " left<div class=\"muted small\">" + fmtMoney(remaining) + " total</div></td>" +
+      "<td>" + (next ? fmtDate(next.dueDate) + '<div class="muted small">' + fmtRelativeDays(next.dueDate) + "</div>" : '<span class="muted small">Paid off</span>') + "</td>" +
+      "<td><div class=\"row\">" +
+        '<button class="btn-sm" data-action="bnpl-mark-paid" data-id="' + p.id + '" title="Record that this payment went through">✓ Paid</button>' +
+        '<button class="btn-sm" data-action="open-bnpl-modal" data-id="' + p.id + '">Edit</button>' +
+        '<button class="btn-sm btn-danger" data-action="delete-bnpl" data-id="' + p.id + '">Delete</button>' +
+      "</div></td></tr>";
+  }
+
+  return '<h2 style="margin:28px 0 6px">Payment plans</h2>' +
+    '<p class="page-sub">Affirm, Klarna and the rest don\'t offer a way for apps to sign in and read your account, so this tracks the schedule instead — which works out the same, since the payments are fixed. Paste a confirmation email into Blue Bonnet and it\'ll fill this in for you.</p>' +
+    '<div class="row" style="flex-wrap:wrap;margin-bottom:14px">' +
+      BNPL_SERVICES.map((s) =>
+        '<a class="btn-sm" href="' + s.url + '" target="_blank" rel="noopener noreferrer">' + s.emoji + " " + s.name + " ↗</a>"
+      ).join("") +
+    "</div>" +
+    (plans.length
+      ? '<div class="grid" style="margin-bottom:14px">' +
+          '<div class="card"><div class="muted small">Due in next 30 days</div><div style="font-size:22px;font-weight:800">' + fmtMoney(next30) + "</div></div>" +
+          '<div class="card"><div class="muted small">Total still owed</div><div style="font-size:22px;font-weight:800">' + fmtMoney(totalOwed) + "</div></div>" +
+          '<div class="card"><div class="muted small">Active plans</div><div style="font-size:22px;font-weight:800">' + plans.filter((p) => Number(p.paymentsRemaining) > 0).length + "</div></div>" +
+        "</div>"
+      : "") +
+    '<div class="row between" style="margin-bottom:10px">' +
+      '<div class="muted small">' + (plans.length ? plans.length + " plan(s)" : "") + "</div>" +
+      '<button class="btn-primary" data-action="open-bnpl-modal" data-id="">+ Add payment plan</button>' +
+    "</div>" +
+    (plans.length
+      ? '<div class="card"><table><thead><tr><th>Merchant</th><th>Payment</th><th>Remaining</th><th>Next due</th><th></th></tr></thead><tbody>' +
+        plans.map(planRow).join("") + "</tbody></table></div>" +
+        (upcoming.length
+          ? '<div class="card" style="margin-top:10px"><div class="muted small" style="margin-bottom:6px">Upcoming charges (next 60 days)</div>' +
+            upcoming.map((c) => '<div class="row between" style="padding:4px 0"><div>' + escapeHtml(c.merchant) + ' <span class="muted small">· ' + escapeHtml(bnplServiceName(c.service)) + "</span></div>" +
+              "<div>" + fmtMoney(c.amount) + ' <span class="muted small">' + fmtDate(c.dueDate) + "</span></div></div>").join("") +
+            "</div>"
+          : "")
+      : emptyState("🧾", "No payment plans yet", "Add an Affirm or Klarna plan and the app will work out every upcoming charge for you."));
+}
+
+// ---------------------------------------------------------------------------
+// Bank statement upload
+//
+// Everything is parsed in the browser — the statement never leaves this device
+// except as part of your own Drive sync. The FILE itself is never stored: only
+// the parsed rows, with anything that looks like a full account or card number
+// reduced to its last 4 digits first.
+// ---------------------------------------------------------------------------
+function renderStatementSection() {
+  const txns = STATE.statementTxns || [];
+  const imports = STATE.statementImports || [];
+  const recent = txns.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 25);
+  const spent = txns.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Math.abs(Number(t.amount)), 0);
+  const inflow = txns.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0);
+
+  return '<h2 style="margin:28px 0 6px">Statements</h2>' +
+    '<p class="page-sub">Upload a CSV from your bank, or paste the text of a statement. It\'s read here in your browser — the file itself is never saved, only the transactions, and account numbers are masked to the last 4 digits.</p>' +
+    '<div class="card" style="margin-bottom:12px">' +
+      '<div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">' +
+        '<label class="btn-primary" style="cursor:pointer">📄 Upload CSV<input type="file" accept=".csv,.txt,.tsv" id="statementFile" style="display:none" /></label>' +
+        '<button class="btn-sm" data-action="open-statement-paste">📋 Paste statement text</button>' +
+        (txns.length ? '<button class="btn-sm btn-danger" data-action="clear-statement-txns">Clear all transactions</button>' : "") +
+      "</div>" +
+      '<div class="hint muted small">PDF statements: open the PDF, select all the text, copy it, and use “Paste statement text”. Blue Bonnet can also read a pasted statement and log it for you.</div>' +
+    "</div>" +
+    (txns.length
+      ? '<div class="grid" style="margin-bottom:12px">' +
+          '<div class="card"><div class="muted small">Money out</div><div style="font-size:22px;font-weight:800">' + fmtMoney(spent) + "</div></div>" +
+          '<div class="card"><div class="muted small">Money in</div><div style="font-size:22px;font-weight:800">' + fmtMoney(inflow) + "</div></div>" +
+          '<div class="card"><div class="muted small">Transactions</div><div style="font-size:22px;font-weight:800">' + txns.length + "</div></div>" +
+        "</div>" +
+        (imports.length ? '<div class="muted small" style="margin-bottom:8px">Imported: ' + imports.map((i) => escapeHtml(i.label) + " (" + i.count + ")").join(" · ") + "</div>" : "") +
+        '<div class="card"><table><thead><tr><th>Date</th><th>Description</th><th>Amount</th></tr></thead><tbody>' +
+        recent.map((t) =>
+          "<tr><td class=\"muted small\">" + escapeHtml(t.date || "") + "</td>" +
+          "<td>" + escapeHtml(t.description || "") + "</td>" +
+          '<td style="color:' + (Number(t.amount) < 0 ? "var(--danger,#c23b3b)" : "#1f8a5f") + '">' + fmtMoney(t.amount) + "</td></tr>"
+        ).join("") + "</tbody></table>" +
+        (txns.length > 25 ? '<div class="muted small" style="margin-top:8px">Showing 25 most recent of ' + txns.length + ".</div>" : "") +
+        "</div>"
+      : emptyState("🏦", "No statement data yet", "Upload a CSV or paste a statement to see your transactions here."));
+}
+
+/* Reduce anything that looks like a full account/card number to its last 4.
+   Statements are full of them, and a backup .json is a plain text file. */
+function maskSensitive(text) {
+  return String(text == null ? "" : text)
+    // 13-19 digit card/account numbers, with or without spaces/dashes
+    .replace(/\b(?:\d[ -]?){12,18}\d\b/g, (m) => {
+      const digits = m.replace(/\D/g, "");
+      return "••••" + digits.slice(-4);
+    })
+    // "Account #123456789" style
+    .replace(/\b(acct|account|acc|card)\s*#?\s*:?\s*(\d{5,})/gi, (m, w, d) => w + " ••••" + d.slice(-4));
+}
+
+/* Parse a statement into { date, description, amount } rows.
+   Handles the common CSV shapes banks export, plus loosely-formatted pasted
+   text. Anything it can't confidently read is skipped rather than guessed at —
+   a wrong number is worse than a missing one. */
+function parseStatementText(text) {
+  const rows = [];
+  const lines = String(text || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return rows;
+
+  const splitCsv = (line) => {
+    const out = []; let cur = ""; let q = false;
+    for (const ch of line) {
+      if (ch === '"') q = !q;
+      else if ((ch === "," || ch === "\t") && !q) { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+    out.push(cur);
+    return out.map((s) => s.trim().replace(/^"|"$/g, ""));
+  };
+
+  const looksCsv = lines[0].includes(",") || lines[0].includes("\t");
+  if (looksCsv) {
+    const header = splitCsv(lines[0]).map((h) => h.toLowerCase());
+    const findCol = (...names) => header.findIndex((h) => names.some((n) => h.includes(n)));
+    let iDate = findCol("date", "posted", "transaction date");
+    let iDesc = findCol("description", "payee", "merchant", "memo", "name");
+    let iAmt = findCol("amount", "value");
+    const iDebit = findCol("debit", "withdrawal");
+    const iCredit = findCol("credit", "deposit");
+    const hasHeader = iDate >= 0 || iDesc >= 0 || iAmt >= 0;
+    const start = hasHeader ? 1 : 0;
+    if (!hasHeader) { iDate = 0; iDesc = 1; iAmt = 2; }
+
+    for (let i = start; i < lines.length; i++) {
+      const c = splitCsv(lines[i]);
+      if (c.length < 2) continue;
+      const date = normalizeDate(c[iDate]);
+      const description = maskSensitive(c[iDesc] || "");
+      let amount = null;
+      if (iAmt >= 0 && c[iAmt] !== undefined && c[iAmt] !== "") amount = parseMoney(c[iAmt]);
+      else if (iDebit >= 0 && c[iDebit]) amount = -Math.abs(parseMoney(c[iDebit]));
+      else if (iCredit >= 0 && c[iCredit]) amount = Math.abs(parseMoney(c[iCredit]));
+      if (!date || amount === null || isNaN(amount)) continue;
+      rows.push({ id: uid(), date, description, amount });
+    }
+    return rows;
+  }
+
+  // Loose text: "08/12/2026  STARBUCKS #123   -5.75"
+  // The parentheses are INSIDE the capture group on purpose — statements write
+  // negatives as (42.10), and if the parens are captured outside the group the
+  // minus sign gets silently dropped and money-out looks like money-in.
+  const re = /^(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?|\d{4}-\d{2}-\d{2})\s+(.*?)\s+(\(?-?\$?[\d,]+\.\d{2}\)?)$/;
+  for (const line of lines) {
+    const m = line.match(re);
+    if (!m) continue;
+    const date = normalizeDate(m[1]);
+    if (!date) continue;
+    let amount = parseMoney(m[3]);
+    if (/\(.*\)/.test(m[3])) amount = -Math.abs(amount); // (12.34) means money out
+    if (isNaN(amount)) continue;
+    rows.push({ id: uid(), date, description: maskSensitive(m[2]), amount });
+  }
+  return rows;
+}
+
+function parseMoney(s) {
+  const n = parseFloat(String(s).replace(/[$,\s]/g, "").replace(/[()]/g, ""));
+  return /^\s*\(/.test(String(s)) ? -Math.abs(n) : n;
+}
+
+function normalizeDate(s) {
+  if (!s) return "";
+  s = String(s).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?$/);
+  if (!m) return "";
+  const mm = String(m[1]).padStart(2, "0");
+  const dd = String(m[2]).padStart(2, "0");
+  let yy = m[3] || String(new Date().getFullYear());
+  if (yy.length === 2) yy = "20" + yy;
+  return yy + "-" + mm + "-" + dd;
+}
+
+function importStatementText(text, label) {
+  const rows = parseStatementText(text);
+  if (!rows.length) {
+    toast("Couldn't find any transactions in that. Try a CSV export, or paste the statement text.");
+    return 0;
+  }
+  // Skip rows already imported (same date + description + amount).
+  const seen = new Set((STATE.statementTxns || []).map((t) => t.date + "|" + t.description + "|" + t.amount));
+  const fresh = rows.filter((r) => !seen.has(r.date + "|" + r.description + "|" + r.amount));
+  STATE.statementTxns = (STATE.statementTxns || []).concat(fresh);
+  STATE.statementImports = (STATE.statementImports || []).concat([{
+    id: uid(), label: label || "Statement", count: fresh.length, importedAt: Date.now(),
+  }]);
+  persist();
+  const dupes = rows.length - fresh.length;
+  toast("Imported " + fresh.length + " transaction(s)" + (dupes ? " · skipped " + dupes + " already there" : ""));
+  return fresh.length;
+}
+
+function openStatementPasteModal() {
+  openModal(
+    "<h3>Paste statement text</h3>" +
+    '<p class="muted small">Copy the transactions out of your statement (or a PDF) and paste them here. Account numbers are masked automatically before anything is saved.</p>' +
+    '<form data-form="statement-paste">' +
+      '<div class="field"><label>Statement text</label><textarea name="text" rows="12" placeholder="08/12/2026   STARBUCKS #123   -5.75" style="width:100%;font-family:monospace;font-size:12px"></textarea></div>' +
+      '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Import</button></div>' +
+    "</form>"
+  );
+}
+
+function openBnplModal(id) {
+  const p = id ? findById(STATE.bnplPlans, id) : { service: "affirm", merchant: "", paymentAmount: "", paymentsRemaining: 4, everyDays: 14, nextDueDate: todayISO(), notes: "" };
+  openModal(
+    "<h3>" + (id ? "Edit payment plan" : "Add payment plan") + "</h3>" +
+    (id ? "" : '<p class="muted small">Quicker option: paste your confirmation email into Blue Bonnet and ask it to add the plan.</p>') +
+    '<form data-form="bnpl" data-id="' + (id || "") + '">' +
+      '<div class="field-row">' +
+        '<div class="field"><label>Service</label><select name="service">' +
+          BNPL_SERVICES.map((s) => '<option value="' + s.id + '"' + (p.service === s.id ? " selected" : "") + ">" + s.name + "</option>").join("") +
+          '<option value="other"' + (p.service === "other" ? " selected" : "") + ">Other</option>" +
+        "</select></div>" +
+        '<div class="field"><label>Merchant / what it was</label><input type="text" name="merchant" required value="' + escapeHtml(p.merchant) + '" placeholder="e.g. Peloton" /></div>' +
+      "</div>" +
+      '<div class="field-row">' +
+        '<div class="field"><label>Payment amount</label><input type="number" step="0.01" name="paymentAmount" required value="' + escapeHtml(p.paymentAmount) + '" /></div>' +
+        '<div class="field"><label>Payments left</label><input type="number" min="0" name="paymentsRemaining" required value="' + (p.paymentsRemaining != null ? p.paymentsRemaining : 4) + '" /></div>' +
+      "</div>" +
+      '<div class="field-row">' +
+        '<div class="field"><label>Next payment due</label><input type="date" name="nextDueDate" required value="' + escapeHtml(p.nextDueDate || todayISO()) + '" /></div>' +
+        '<div class="field"><label>Every (days)</label><select name="everyDays">' +
+          [["14","Every 2 weeks"],["30","Monthly"],["7","Weekly"]].map(([v,l]) => '<option value="' + v + '"' + (String(p.everyDays || 14) === v ? " selected" : "") + ">" + l + "</option>").join("") +
+        "</select></div>" +
+      "</div>" +
+      '<div class="field"><label>Notes (optional)</label><input type="text" name="notes" value="' + escapeHtml(p.notes || "") + '" /></div>' +
+      '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button><button type="submit" class="btn-primary">Save</button></div>' +
+    "</form>"
+  );
+}
+
+/* Record that the next payment went through: one fewer remaining, and the due
+   date rolls forward. Never auto-runs — the user confirms it actually cleared. */
+function bnplMarkPaid(id) {
+  const p = findById(STATE.bnplPlans, id);
+  if (!p) return;
+  const remaining = Number(p.paymentsRemaining) || 0;
+  if (remaining <= 0) { toast("That plan's already paid off."); return; }
+  p.paymentsRemaining = remaining - 1;
+  p.nextDueDate = addDaysISO(p.nextDueDate, Number(p.everyDays) || 14);
+  persist();
+  toast(p.paymentsRemaining === 0 ? "That's the last one — " + p.merchant + " is paid off 🎉" : p.paymentsRemaining + " payment(s) left on " + p.merchant);
 }
 
 function openBillModal(id) {
@@ -1540,6 +1834,24 @@ function handleAction(el, e) {
     case "goto-tab": switchTab(el.dataset.tab); break;
     case "open-bill-modal": openBillModal(id || null); break;
     case "delete-bill": if (confirm("Delete this bill?")) deleteBill(id); break;
+    case "open-bnpl-modal": openBnplModal(id || null); break;
+    case "bnpl-mark-paid": bnplMarkPaid(id); break;
+    case "delete-bnpl":
+      if (confirm("Delete this payment plan? This only removes it from the app — it doesn't cancel anything with the lender.")) {
+        STATE.bnplPlans = STATE.bnplPlans.filter((p) => p.id !== id);
+        persist();
+        toast("Payment plan removed");
+      }
+      break;
+    case "open-statement-paste": openStatementPasteModal(); break;
+    case "clear-statement-txns":
+      if (confirm("Clear all imported transactions? Your bills and payment plans aren't affected.")) {
+        STATE.statementTxns = [];
+        STATE.statementImports = [];
+        persist();
+        toast("Transactions cleared");
+      }
+      break;
     case "sync-bill-calendar": syncBillCalendar(id); break;
     case "sync-all-bills-calendar": syncAllBillsCalendar(); break;
     case "open-add-asset-modal": openAddAssetModal(); break;
@@ -1629,7 +1941,38 @@ function handleSubmit(form, e) {
     case "onboarding-calendar": onboardingConnect(); break;
     case "import-review": saveImportReviewForm(form); break;
     case "settings-bluebonnet": saveBlueBonnetSettings(form); break;
+    case "bnpl": saveBnplForm(form); break;
+    case "statement-paste": {
+      const text = collectFormData(form).text || "";
+      closeModal();
+      importStatementText(text, "Pasted " + fmtDate(todayISO()));
+      break;
+    }
   }
+}
+
+function saveBnplForm(form) {
+  const d = collectFormData(form);
+  const id = form.dataset.id;
+  const plan = {
+    id: id || uid(),
+    service: d.service || "other",
+    merchant: (d.merchant || "").trim(),
+    paymentAmount: Number(d.paymentAmount) || 0,
+    paymentsRemaining: Math.max(0, Number(d.paymentsRemaining) || 0),
+    everyDays: Number(d.everyDays) || 14,
+    nextDueDate: d.nextDueDate || todayISO(),
+    notes: (d.notes || "").trim(),
+  };
+  if (id) {
+    const i = STATE.bnplPlans.findIndex((p) => p.id === id);
+    if (i >= 0) STATE.bnplPlans[i] = plan;
+  } else {
+    STATE.bnplPlans.push(plan);
+  }
+  persist();
+  closeModal();
+  toast(id ? "Payment plan updated" : "Payment plan added");
 }
 
 function switchTab(tab) { currentTab = tab; expandedIds.clear(); render(); }
@@ -1650,6 +1993,18 @@ function wireEvents() {
     const actionEl = e.target.closest("[data-action]");
     if (actionEl) handleChange(actionEl);
     if (e.target.id === "importFile" && e.target.files[0]) importDataFile(e.target.files[0]);
+    // Bank statement upload. Delegated (not bound directly) because the input
+    // is re-created on every render, which would drop a direct listener.
+    // The file is read here in the browser and then discarded — only the
+    // parsed, masked transactions are ever saved.
+    if (e.target.id === "statementFile" && e.target.files[0]) {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = () => { importStatementText(reader.result, file.name); };
+      reader.onerror = () => toast("Couldn't read that file.");
+      reader.readAsText(file);
+      e.target.value = ""; // let the same file be picked again later
+    }
   });
   // Live hue preview while dragging, ahead of the "change" event that persists it
   document.body.addEventListener("input", (e) => {
@@ -1709,6 +2064,73 @@ const AdultingActions = {
     persist();
     if (isAllPaidNow && !wasAllPaid) showPraise("budget");
     return { ok: true, message: `Marked "${b.name}" paid for this period.` };
+  },
+
+  /* Add a buy-now-pay-later plan. Built for the paste-a-confirmation-email
+     flow: Blue Bonnet reads the email, pulls out the terms, and calls this. */
+  addPaymentPlan(data) {
+    if (!data || !data.merchant || data.paymentAmount == null) {
+      return { ok: false, message: "Need at least the merchant and the payment amount." };
+    }
+    const plan = {
+      id: uid("bnpl"),
+      service: (data.service || "other").toLowerCase(),
+      merchant: String(data.merchant),
+      paymentAmount: Number(data.paymentAmount) || 0,
+      paymentsRemaining: Math.max(0, Number(data.paymentsRemaining) || 0),
+      everyDays: Number(data.everyDays) || 14,
+      nextDueDate: data.nextDueDate || todayISO(),
+      notes: data.notes ? String(data.notes) : "",
+    };
+    STATE.bnplPlans.push(plan);
+    persist();
+    const total = plan.paymentAmount * plan.paymentsRemaining;
+    return {
+      ok: true,
+      message: `Added ${bnplServiceName(plan.service)} plan for ${plan.merchant}: ` +
+        `${fmtMoney(plan.paymentAmount)} × ${plan.paymentsRemaining} (${fmtMoney(total)} left), next on ${plan.nextDueDate}.`,
+    };
+  },
+
+  /* Record that a plan's payment cleared: one fewer left, date rolls forward. */
+  markPaymentPlanPaid(data) {
+    const p = fuzzyFind(STATE.bnplPlans, data && data.merchant, "merchant");
+    if (!p) return { ok: false, message: `No payment plan found matching "${data && data.merchant}".` };
+    if ((Number(p.paymentsRemaining) || 0) <= 0) return { ok: false, message: `${p.merchant} is already paid off.` };
+    p.paymentsRemaining = Number(p.paymentsRemaining) - 1;
+    p.nextDueDate = addDaysISO(p.nextDueDate, Number(p.everyDays) || 14);
+    persist();
+    return {
+      ok: true,
+      message: p.paymentsRemaining === 0
+        ? `${p.merchant} is paid off.`
+        : `${p.merchant}: ${p.paymentsRemaining} payment(s) left, next on ${p.nextDueDate}.`,
+    };
+  },
+
+  /* Log transactions read out of a statement the user pasted into the chat.
+     Descriptions get masked here too, so this path can't sneak a full account
+     number into storage either. */
+  logTransactions(data) {
+    const rows = (data && Array.isArray(data.transactions)) ? data.transactions : [];
+    if (!rows.length) return { ok: false, message: "No transactions to log." };
+    const seen = new Set((STATE.statementTxns || []).map((t) => t.date + "|" + t.description + "|" + t.amount));
+    let added = 0;
+    rows.forEach((r) => {
+      const date = normalizeDate(r.date) || r.date;
+      const description = maskSensitive(r.description || "");
+      const amount = Number(r.amount);
+      if (!date || isNaN(amount)) return;
+      const key = date + "|" + description + "|" + amount;
+      if (seen.has(key)) return;
+      seen.add(key);
+      STATE.statementTxns.push({ id: uid("txn"), date, description, amount });
+      added++;
+    });
+    if (!added) return { ok: false, message: "Those were all already logged." };
+    STATE.statementImports.push({ id: uid("imp"), label: data.label || "Via Blue Bonnet", count: added, importedAt: Date.now() });
+    persist();
+    return { ok: true, message: `Logged ${added} transaction(s) to the Budget tab.` };
   },
 
   addHouseholdArea(data) {
