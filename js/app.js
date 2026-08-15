@@ -321,7 +321,7 @@ const TABS = [
    required digging through GitHub's API or a CDN that serves stale copies.
    Showing the version in the app itself makes it a one-second glance instead.
    Bump this whenever you ship a change. */
-const APP_VERSION = "2026.08.16d — settings autosave";
+const APP_VERSION = "2026.08.16e — worker URL baked in";
 
 function renderNav() {
   const attn = getAttentionCount();

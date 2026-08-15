@@ -1,25 +1,38 @@
-ADULTING  v2026.08.16d — settings autosave
+ADULTING  v2026.08.16e — Worker URL baked in
 
-DO THIS FIRST (no upload needed, fixes it right now)
-  Settings -> scroll to the "Blue Bonnet Assistant" CARD
-  Paste into Worker Proxy URL:
+WHAT CHANGED
+  Your Worker URL is now hardcoded as the built-in default:
       https://bluebonnetproxy.dustin12342986.workers.dev
-  Click the Save button INSIDE THAT CARD — not the one higher up the page.
-  You should see a "Saved" toast.
 
-WHY IT KEPT NOT STICKING
-  The Settings page has three separate forms, each with its own Save button.
-  Pasting into the Blue Bonnet field and then clicking the General or Calendar
-  Save button silently discards it — the paste looks like it worked and isn't
-  stored anywhere.
+  Blue Bonnet no longer depends on anything being saved in Settings. Clear your
+  site data, switch browsers, use a new device — it still works.
 
-FIXED IN THIS BUILD
-  The Worker Proxy URL now saves the moment you click away from the field.
-  No Save button needed, no way to lose it by pressing the wrong one. It also
-  pulls the URL out if you paste a whole sentence around it.
+  Settings still overrides it if you ever point it somewhere else.
+
+WHY
+  That URL had to be re-entered repeatedly and kept not sticking. Three
+  different causes, all producing the identical "Couldn't reach the assistant"
+  message:
+    - clearing site data wiped it
+    - Settings has three separate forms with three Save buttons, so pasting in
+      one and clicking another silently discarded it
+    - one paste picked up a whole paragraph of surrounding text
+
+  There was nothing to gain from keeping it configurable — it's your own
+  Worker and the URL is visible in network requests anyway.
+
+  A second bug was found while testing this: the "do we have Anthropic?" check
+  compared the URL against the fallback constant. Turning that constant into a
+  real URL would have made a perfectly good default look unconfigured. It now
+  checks whether the URL is actually a URL.
+
+CHECKING IT YOURSELF
+  Browser console:  BlueBonnet.status()
+  Returns the URL in use, whether it's usable, whether the gateway key is
+  filled in, and whether it came from Settings or the built-in default.
 
 FILES
   repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
   js folder:  app.js, state.js, budget-engine.js, reentry.js,
               blue-bonnet-widget-organize.js
-  Upload from INSIDE this folder. Sidebar should then read v2026.08.16d.
+  Upload from INSIDE this folder. Sidebar should read v2026.08.16e.

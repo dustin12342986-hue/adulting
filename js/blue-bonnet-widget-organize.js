@@ -137,7 +137,17 @@ function bbToPlainMessages(system, messages) {
 }
 
 (function () {
-  const PROXY_URL_FALLBACK = "PASTE_YOUR_ADULTING_WORKER_URL_HERE";
+  /* Baked in rather than left to Settings.
+
+     This URL kept having to be re-entered — cleared site data wiped it, and
+     Settings has three separate forms with three Save buttons, so pasting into
+     one and clicking another silently discarded it. Every one of those looked
+     identical from the outside: "Couldn't reach the assistant".
+
+     It's the user's own Worker and the URL is already visible in network
+     requests, so there's nothing gained by hiding it here. Settings still
+     overrides this if it's ever set. */
+  const PROXY_URL_FALLBACK = "https://bluebonnetproxy.dustin12342986.workers.dev";
 
   // Reads the Worker proxy URL from Settings -> Blue Bonnet Assistant if the
   // user set one there (no source editing required); falls back to the
@@ -1119,9 +1129,13 @@ specifics you weren't given.
          filled in, go straight there — an assistant that talks is far better
          than an error message, and "works even when Anthropic isn't available"
          has to include "isn't set up yet", not just "ran out of credit". */
-      const haveAnthropic = proxyUrl !== PROXY_URL_FALLBACK;
+      /* "Do we have a usable Anthropic proxy?" must be a question about the
+         URL itself, not about whether it differs from the fallback constant —
+         the fallback is now a real working URL, so comparing against it would
+         make a perfectly good default look unconfigured. */
+      const haveAnthropic = /^https?:\/\//.test(String(proxyUrl || ""));
       if (!haveAnthropic && !BB.configured()) {
-        throw new Error("Proxy URL not configured yet");
+        throw new Error("No assistant endpoint configured — set a Worker Proxy URL in Settings, or fill in the gateway KEY in blue-bonnet-widget-organize.js");
       }
       const liveContext = buildLiveContext();
       const systemPrompt = `You are Blue Bonnet, the organizing assistant built into Adulting — a household app built primarily for ADHD, autistic, and other neurodivergent users. Keep answers short, concrete, and encouraging. Never shame a messy space, a missed bill, or a broken streak. Give one clear next step by default, not a long plan, unless asked for more. Use the expert knowledge base below as your foundation.\n\nWhen — and only when — pointing the user at a specific part of the app is genuinely the most useful next step, end your reply with exactly one line in this exact format: [[goto:ID|Short label]] using one of these ids: dashboard, budget, household, groceries, vehicles, travel, settings, board (see NAVIGATING ADULTING in the knowledge base for what each contains). This renders as a real button, so never mention the format itself to the user, never use it more than once per reply, and skip it entirely on replies where no single tab is the obvious next step.${checkInMode ? "\n\nThis particular message is a PROACTIVE CHECK-IN you are initiating, not something the user asked — they haven't said anything. Keep it very short (1-2 sentences), warm, low-pressure, and specific to the live data below if there's anything worth mentioning. If nothing stands out, a brief, genuine 'no pressure, just checking in' is perfectly fine — don't invent urgency that isn't there. Do not use any tools during a check-in — notice and mention things, don't act on them unasked." : "\n\nYou also have tools to actually perform actions in the app when the user clearly wants something done, not just discussed (add a bill, check off a chore, log groceries, mark maintenance done, create a trip, etc.). Ask for missing required details rather than guessing — never invent an amount, date, or name. After a tool call, confirm briefly in your own words; don't repeat raw data back. Don't chain more than 2-3 tool calls in a row without pausing to summarize what you did."}\n\nKNOWLEDGE BASE:\n${ADULTING_KB}${liveContext ? "\n\nLIVE HOUSEHOLD DATA:\n" + liveContext : "\n\n(No live household data available — window.STATE wasn't found, so answer from general expertise only.)"}`;
@@ -1227,6 +1241,18 @@ specifics you weren't given.
      e.g. the Budget tab's "Where's my money going?" button. Kept deliberately
      tiny: open the panel, and ask a question as if the user typed it. */
   window.BlueBonnet = {
+    /* Handy for checking configuration without guessing:
+       BlueBonnet.status() in the browser console. */
+    status() {
+      const url = resolveProxyUrl();
+      return {
+        anthropicUrl: url,
+        anthropicUsable: /^https?:\/\//.test(String(url || "")),
+        gatewayConfigured: BB.configured(),
+        source: (window.STATE && window.STATE.settings && window.STATE.settings.blueBonnetProxyUrl)
+          ? "Settings" : "built-in default",
+      };
+    },
     open() {
       if (!open) bubble.onclick();
     },
