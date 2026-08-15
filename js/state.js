@@ -174,6 +174,17 @@ function defaultState() {
     // numbers masked to the last 4 digits (see maskSensitive in app.js).
     statementTxns: [],
     statementImports: [], // { id, label, source, count, importedAt }
+
+    /* Budget plan.
+       categories: { "Groceries": 600, ... } monthly caps
+       income: expected monthly money in (0 = unknown)
+       method: which generated plan this came from, for explaining later
+       rollover: unspent money carries to next month (kinder for ADHD —
+                 one bad week doesn't brand the whole month a failure) */
+    budget: {
+      active: false, method: "", income: 0, categories: {},
+      createdAt: null, rollover: true, notes: "",
+    },
   };
 }
 
@@ -224,6 +235,8 @@ function loadState() {
     // so existing users don't hit "cannot read length of undefined".
     ["bills","assets","groceries","vehicles","trips","bnplPlans","statementTxns","statementImports"]
       .forEach((k) => { if (!Array.isArray(merged[k])) merged[k] = []; });
+    merged.budget = Object.assign(defaultState().budget, parsed.budget || {});
+    if (!merged.budget.categories || typeof merged.budget.categories !== "object") merged.budget.categories = {};
     // settings is merged one level deep so new default fields (added in later
     // versions of the app) show up for people with an existing saved state.
     merged.settings = Object.assign(defaultState().settings, parsed.settings || {});

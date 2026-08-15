@@ -321,7 +321,7 @@ const TABS = [
    required digging through GitHub's API or a CDN that serves stale copies.
    Showing the version in the app itself makes it a one-second glance instead.
    Bump this whenever you ship a change. */
-const APP_VERSION = "2026.08.15e — progress + ETA";
+const APP_VERSION = "2026.08.16a — budgeting + anti-burnout";
 
 function renderNav() {
   const attn = getAttentionCount();
@@ -421,7 +421,45 @@ function renderDashboard() {
   const regularTotal = STATE.bills.filter((b) => b.type === "regular").reduce((s, b) => s + Number(b.amount || 0), 0);
   const discTotal = STATE.bills.filter((b) => b.type === "discretionary").reduce((s, b) => s + Number(b.amount || 0), 0);
 
-  return '<h1>Dashboard</h1><p class="page-sub">A calm look at where things stand — what\'s next first, what needs a look further down.</p>' +
+  const gentle = needsGentleWelcome(STATE);
+  const one = pickOneThing(STATE);
+  const done = lifetimeDone(STATE);
+
+  /* Coming back after a few days away used to open on a wall of red. That
+     feeling is why people stop opening the app at all. When someone's been
+     gone, lead with a welcome and at most three things — the full list is
+     still right there underneath if they want it. */
+  const welcome = gentle
+    ? '<div class="card" style="border-left:4px solid var(--primary,#5B9BB8);margin-bottom:16px">' +
+        "<strong>" + escapeHtml(rotatingLine(RETURN_LINES)) + "</strong>" +
+        '<p class="muted small" style="margin:6px 0 10px">Nothing expired that can\'t be sorted, and nothing reset your progress. Here\'s what moved while you were away:</p>' +
+        (whileYouWereAway(STATE).length
+          ? "<ul style=\"margin:0 0 4px;padding-left:18px\">" +
+            whileYouWereAway(STATE).map((i) => "<li>" + i.icon + " " + escapeHtml(i.text) + "</li>").join("") + "</ul>"
+          : '<div class="muted small">Nothing at all, actually.</div>') +
+      "</div>"
+    : "";
+
+  const startHere = '<div class="card" style="margin-bottom:16px;background:linear-gradient(135deg,var(--surface,#fff),var(--accent-soft,#f4f8fb))">' +
+      '<div class="muted small">Start here</div>' +
+      '<div style="font-size:19px;font-weight:700;margin:2px 0 4px">' + escapeHtml(one.label) + "</div>" +
+      '<div class="muted small">' + escapeHtml(one.why) + "</div>" +
+      (one.kind !== "none"
+        ? '<button class="btn-sm" style="margin-top:10px" data-tab="' + one.tab + '">Take me there</button>'
+        : "") +
+    "</div>";
+
+  const wins = quickWins(STATE, 3);
+  const quick = wins.length
+    ? '<div class="card" style="margin-bottom:16px"><div class="muted small" style="margin-bottom:6px">Under two minutes each</div>' +
+      wins.map((w) => '<div class="row between" style="padding:3px 0"><span>' + escapeHtml(w.label) +
+        ' <span class="muted small">' + escapeHtml(w.sub) + "</span></span></div>").join("") + "</div>"
+    : "";
+
+  return '<h1>Dashboard</h1>' +
+    '<p class="page-sub">' + escapeHtml(rotatingLine(WELCOME_LINES)) + "</p>" +
+    welcome + startHere + quick +
+    (done > 0 ? '<div class="muted small" style="margin:-6px 0 14px">' + done + " thing(s) done in here so far. That number never goes down.</div>" : "") +
     '<div class="section-title">Today &amp; this week</div>' +
     (todayItems.length
       ? '<div class="card"><table><tbody>' + todayItems.map((i) =>
@@ -436,7 +474,7 @@ function renderDashboard() {
       dashCard("budget", "Budget this month", fmtMoney(regularTotal + discTotal) + " total · " + paidCount + "/" + billsThisPeriod.length + " paid", "budget") +
     "</div>" +
     (attentionItems.length
-      ? '<div class="section-title" style="margin-top:22px">Worth a look (' + attentionItems.length + ')</div><div class="attention-banner"><ul>' +
+      ? '<div class="section-title" style="margin-top:22px">When you have a minute (' + attentionItems.length + ')</div><div class="attention-banner"><ul>' +
         attentionItems.map((i) => "<li><strong>" + escapeHtml(i.label) + "</strong>" + (i.note ? " — " + escapeHtml(i.note) : "") + "</li>").join("") +
         "</ul></div>"
       : '<div class="reassure" style="margin-top:22px"><span class="icon">✅</span> Nothing is flagged right now. You’re caught up.</div>') +
@@ -574,7 +612,8 @@ function renderBudget() {
       "</div></td></tr>";
   }
 
-  return '<h1>Budget</h1><p class="page-sub">Regular = fixed necessities. Discretionary = spending by choice. Keeping them separate makes trade-offs visible.</p>' +
+  return '<h1>Budget</h1>' + renderBudgetPlan() +
+    '<p class="page-sub">Regular = fixed necessities. Discretionary = spending by choice. Keeping them separate makes trade-offs visible.</p>' +
     '<div class="grid" style="margin-bottom:20px">' +
       '<div class="card"><div class="muted small">Total this month</div><div style="font-size:26px;font-weight:800">' + fmtMoney(total) + "</div></div>" +
       '<div class="card"><div class="muted small">Regular (fixed)</div><div style="font-size:26px;font-weight:800;color:var(--primary-dark)">' + fmtMoney(regularTotal) + "</div></div>" +
@@ -964,7 +1003,24 @@ function parseStatementText(text) {
     return out.map((s) => s.trim().replace(/^"|"$/g, ""));
   };
 
-  const looksCsv = lines[0].includes(",") || lines[0].includes("\t");
+  /* Deciding CSV vs. loose text on "does line 1 contain a comma" was wrong in a
+     way that broke real statements: a running balance of 4,994.25 has a comma
+     in it, so a plain PDF statement got sent down the CSV path and came back
+     with almost nothing.
+
+     Decide on structure instead:
+       - a header row naming columns, or
+       - most lines sharing the same field count (that's what a table is)
+     A thousands separator in a number does neither. */
+  const firstLine = lines[0] || "";
+  const headerish = /(^|[,\t])\s*("?)(date|posted|description|payee|merchant|memo|amount|debit|credit|balance)\2\s*([,\t]|$)/i.test(firstLine);
+  const fieldCount = (l) => l.split(/[,\t]/).length;
+  const counts = lines.slice(0, 12).map(fieldCount);
+  const commonCount = counts.sort((a, b) =>
+    counts.filter((v) => v === a).length - counts.filter((v) => v === b).length).pop();
+  const consistentTable = commonCount >= 3 &&
+    counts.filter((c) => c === commonCount).length >= Math.max(3, Math.ceil(counts.length * 0.7));
+  const looksCsv = (firstLine.includes(",") || firstLine.includes("\t")) && (headerish || consistentTable);
   if (looksCsv) {
     const header = splitCsv(lines[0]).map((h) => h.toLowerCase());
     const findCol = (...names) => header.findIndex((h) => names.some((n) => h.includes(n)));
@@ -1193,6 +1249,110 @@ async function importStatementPdf(file) {
     console.error(e);
     toast("Couldn't read that PDF (" + e.message + "). Try the CSV export, or copy the text and paste it.");
   }
+}
+
+
+/* ===========================================================================
+   Budget planner UI
+   =========================================================================== */
+function renderBudgetPlan() {
+  const b = STATE.budget || {};
+  const txns = STATE.statementTxns || [];
+
+  if (!b.active) {
+    const a = analyzeSpending(txns);
+    if (!a.enoughData) {
+      return '<div class="card" style="margin-bottom:18px"><strong>Set up a budget</strong>' +
+        '<p class="muted small" style="margin:6px 0 10px">Import a statement first — a budget built from what you actually spend is one you might keep. Guessing at numbers is how budgets get abandoned.</p>' +
+        '<button class="btn-sm" data-action="set-tab-statements">Go to Statements</button></div>';
+    }
+    return '<div class="card" style="margin-bottom:18px">' +
+      "<strong>Ready to build a budget</strong>" +
+      '<p class="muted small" style="margin:6px 0 10px">Based on ' + a.monthCount + " month(s) of your actual spending" +
+      (a.confident ? "" : " — one month is a starting point, not a pattern; it'll get better with more") + ". " +
+      "Typical month: " + fmtMoney(a.typicalSpend) + " out" + (a.typicalIncome ? ", " + fmtMoney(a.typicalIncome) + " in" : "") + ".</p>" +
+      '<button class="btn-primary" data-action="open-budget-options">See my budget options</button></div>';
+  }
+
+  const p = budgetProgress(STATE);
+  const tone = p.overBy > 0 ? "over" : p.onPace ? "ok" : "close";
+  const headline = p.safeToSpendToday != null
+    ? (p.overBy > 0
+        ? '<div style="font-size:15px">The flexible budget for this month is used up.</div>' +
+          '<div class="muted small" style="margin-top:4px">Over by ' + fmtMoney(p.overBy) + " with " + p.daysLeft + " day(s) to go. Not a disaster — next month resets, and you can shift a category below if the number was simply wrong.</div>"
+        : '<div class="muted small">Safe to spend today</div>' +
+          '<div style="font-size:32px;font-weight:800;line-height:1.1">' + fmtMoney(p.safeToSpendToday) + "</div>" +
+          '<div class="muted small" style="margin-top:4px">' + fmtMoney(Math.max(0, p.flexLeft)) + " left across " + p.daysLeft + " day(s)</div>")
+    : "";
+
+  return '<div class="card" style="margin-bottom:18px;border-left:4px solid ' +
+      (tone === "over" ? "var(--attention,#c23b3b)" : tone === "close" ? "#b8790a" : "#1f8a5f") + '">' +
+    '<div class="row between" style="align-items:flex-start">' +
+      "<div>" + headline + "</div>" +
+      '<div class="row"><button class="btn-sm" data-action="open-budget-options">Change plan</button>' +
+      '<button class="btn-sm" data-action="ask-bluebonnet-budget">Ask Blue Bonnet</button></div>' +
+    "</div>" +
+    '<div style="height:8px;background:var(--border,#e1e6ee);border-radius:4px;margin:12px 0 6px;overflow:hidden">' +
+      '<div style="height:8px;width:' + Math.min(100, p.pct) + '%;background:' +
+      (p.pct > 100 ? "var(--attention,#c23b3b)" : p.pct > 85 ? "#b8790a" : "#1f8a5f") + '"></div></div>' +
+    '<div class="muted small">' + fmtMoney(p.totalSpent) + " of " + fmtMoney(p.totalCap) + " · day " + p.dayOfMonth + " of " + p.daysInMonth +
+      (p.onPace ? " · on pace" : " · ahead of pace") + "</div>" +
+    '<table style="margin-top:12px"><tbody>' +
+    p.rows.filter((r) => r.cap > 0).map((r) =>
+      "<tr><td><strong>" + escapeHtml(r.name) + "</strong>" + (r.fixed ? ' <span class="muted small">fixed</span>' : "") + "</td>" +
+      '<td style="width:40%"><div style="height:6px;background:var(--border,#e1e6ee);border-radius:3px;overflow:hidden">' +
+        '<div style="height:6px;width:' + Math.min(100, r.pct) + '%;background:' +
+        (r.status === "over" ? "var(--attention,#c23b3b)" : r.status === "close" ? "#b8790a" : "#1f8a5f") + '"></div></div></td>' +
+      '<td style="text-align:right;white-space:nowrap">' + fmtMoney(r.spent) + ' <span class="muted small">/ ' + fmtMoney(r.cap) + "</span></td>" +
+      '<td style="text-align:right;white-space:nowrap"><button class="btn-sm" data-action="edit-cap" data-id="' + encodeURIComponent(r.name) + '">edit</button></td></tr>'
+    ).join("") + "</tbody></table></div>";
+}
+
+function openBudgetOptions() {
+  const a = analyzeSpending(STATE.statementTxns || []);
+  const plans = generateBudgetOptions(a, { income: (STATE.budget && STATE.budget.income) || 0 });
+  if (!plans.length) { toast("Import a statement first so there's something to base it on."); return; }
+  window.__budgetPlans = plans;
+
+  openModal(
+    "<h3>Pick a budget</h3>" +
+    '<p class="muted small">Built from ' + a.monthCount + " month(s) of your own spending. Nothing here is locked in — you can change any number later, and switching plans doesn't lose anything.</p>" +
+    plans.map((pl, i) =>
+      '<div class="card" style="margin-bottom:10px">' +
+        '<div class="row between"><strong>' + escapeHtml(pl.label) + "</strong>" +
+        "<span>" + fmtMoney(pl.total) + "/mo</span></div>" +
+        '<p class="muted small" style="margin:6px 0 8px">' + escapeHtml(pl.blurb) + "</p>" +
+        '<div class="muted small">' + (pl.saves > 0 ? "Frees up about " + fmtMoney(pl.saves) + " a month" : "Same as now") +
+          (pl.leftover != null ? " · " + (pl.leftover >= 0 ? fmtMoney(pl.leftover) + " left over" : fmtMoney(Math.abs(pl.leftover)) + " short of income") : "") + "</div>" +
+        '<button class="btn-primary btn-sm" style="margin-top:8px" data-action="choose-budget" data-id="' + i + '">Use this one</button>' +
+      "</div>").join("") +
+    '<div class="modal-actions"><button type="button" data-action="close-modal">Not now</button></div>'
+  );
+}
+
+function chooseBudget(idx) {
+  const plans = window.__budgetPlans || [];
+  const pl = plans[Number(idx)];
+  if (!pl) return;
+  STATE.budget = Object.assign({}, STATE.budget, {
+    active: true, method: pl.id, categories: Object.assign({}, pl.categories),
+    createdAt: new Date().toISOString(),
+  });
+  persist();
+  closeModal();
+  toast("Budget set: " + pl.label + ". Change any number any time.");
+}
+
+function openEditCap(name) {
+  const cur = (STATE.budget.categories || {})[name] || 0;
+  openModal(
+    "<h3>" + escapeHtml(name) + "</h3>" +
+    '<p class="muted small">If this number keeps getting broken, the number is probably wrong — not you. Change it.</p>' +
+    '<form data-form="edit-cap" data-id="' + escapeHtml(name) + '">' +
+      '<div class="field"><label>Monthly amount</label><input type="number" step="1" name="cap" value="' + cur + '" autofocus /></div>' +
+      '<div class="modal-actions"><button type="button" data-action="close-modal">Cancel</button>' +
+      '<button type="submit" class="btn-primary">Save</button></div></form>'
+  );
 }
 
 /* ===========================================================================
@@ -2628,6 +2788,15 @@ function handleAction(el, e) {
       break;
     }
     case "charge-tracker": runChargeTracker(); break;
+    case "open-budget-options": openBudgetOptions(); break;
+    case "choose-budget": chooseBudget(id); break;
+    case "edit-cap": openEditCap(decodeURIComponent(id)); break;
+    case "set-tab-statements": statementView = "categories"; render(); break;
+    case "ask-bluebonnet-budget":
+      if (window.BlueBonnet && window.BlueBonnet.isConfigured && window.BlueBonnet.isConfigured()) {
+        window.BlueBonnet.ask("Look at my budget and this month's spending and tell me honestly how it's going. If a category is set unrealistically, say so and suggest a better number.");
+      } else toast("Set your Worker Proxy URL in Settings → Blue Bonnet first.");
+      break;
     case "skipped-to-bluebonnet": {
       const lines = window.__lastSkippedLines || [];
       closeModal();
@@ -2741,6 +2910,16 @@ function handleSubmit(form, e) {
     case "import-review": saveImportReviewForm(form); break;
     case "settings-bluebonnet": saveBlueBonnetSettings(form); break;
     case "bnpl": saveBnplForm(form); break;
+    case "edit-cap": {
+      const name = form.dataset.id;
+      const v = Math.max(0, Number(collectFormData(form).cap) || 0);
+      STATE.budget.categories = STATE.budget.categories || {};
+      STATE.budget.categories[name] = v;
+      persist();
+      closeModal();
+      toast(name + " set to " + fmtMoney(v));
+      break;
+    }
     case "statement-paste": {
       const text = collectFormData(form).text || "";
       closeModal();
@@ -2938,6 +3117,51 @@ const AdultingActions = {
     STATE.statementImports.push({ id: uid("imp"), label: data.label || "Via Blue Bonnet", count: added, importedAt: Date.now() });
     persist();
     return { ok: true, message: `Logged ${added} transaction(s) to the Budget tab.` };
+  },
+
+  /* Budget building, for Blue Bonnet. It can create and adjust a budget, but
+     never wipes one — same rule as everywhere else in here. */
+  buildBudget(data) {
+    const cats = (data && data.categories) || {};
+    const names = Object.keys(cats);
+    if (!names.length) return { ok: false, message: "Need at least one category and amount." };
+    STATE.budget = Object.assign({}, STATE.budget, {
+      active: true,
+      method: data.method || "blue-bonnet",
+      income: Number(data.income) || STATE.budget.income || 0,
+      categories: Object.assign({}, STATE.budget.categories || {}, cats),
+      createdAt: STATE.budget.createdAt || new Date().toISOString(),
+      notes: data.notes || STATE.budget.notes || "",
+    });
+    persist();
+    const total = names.reduce((s2, k) => s2 + (Number(cats[k]) || 0), 0);
+    return { ok: true, message: "Budget set across " + names.length + " categories, " + fmtMoney(total) + "/month." };
+  },
+
+  setCategoryBudget(data) {
+    if (!data || !data.category || data.amount == null) return { ok: false, message: "Need a category and an amount." };
+    STATE.budget.categories = STATE.budget.categories || {};
+    STATE.budget.categories[data.category] = Math.max(0, Number(data.amount) || 0);
+    STATE.budget.active = true;
+    persist();
+    return { ok: true, message: data.category + " set to " + fmtMoney(data.amount) + "/month." };
+  },
+
+  /* Read-only: lets Blue Bonnet answer "how am I doing" with real numbers
+     instead of guessing from the chat context. */
+  getBudgetStatus() {
+    if (!STATE.budget || !STATE.budget.active) return { ok: true, message: "No budget set yet." };
+    const p = budgetProgress(STATE);
+    const lines = p.rows.filter((r) => r.cap > 0)
+      .map((r) => r.name + ": " + r.spent.toFixed(2) + " of " + r.cap.toFixed(2) + " (" + r.status + ")");
+    return {
+      ok: true,
+      message: "Day " + p.dayOfMonth + " of " + p.daysInMonth + ". " +
+        p.totalSpent.toFixed(2) + " of " + p.totalCap.toFixed(2) + " used. " +
+        (p.overBy > 0 ? "Flexible budget is used up, over by " + p.overBy.toFixed(2) + ". "
+                      : "Safe to spend today: " + (p.safeToSpendToday || 0).toFixed(2) + ". ") +
+        lines.join("; "),
+    };
   },
 
   addHouseholdArea(data) {
@@ -3244,6 +3468,17 @@ function init() {
   // Keep ingesting new calendar changes automatically while the tab is open
   setInterval(() => { if (Calendar.isConnected()) runCalendarImport(); }, 15 * 60 * 1000);
 }
+
+/* Record the visit AFTER the first render, so this session still sees the
+   gentle welcome it earned rather than immediately clearing it. */
+window.addEventListener("load", () => {
+  setTimeout(() => {
+    try {
+      STATE.settings.lastOpenedAt = new Date().toISOString();
+      saveState(STATE);
+    } catch (e) { /* not worth surfacing */ }
+  }, 1500);
+});
 
 document.addEventListener("DOMContentLoaded", init);
 

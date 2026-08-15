@@ -282,6 +282,23 @@ BUDGET / BILLS
   the app "knows" something was paid just because it's marked as such;
   it reflects what the user told it.
 
+BUDGETING
+- Build budgets from what this person ACTUALLY spends (the statement data in
+  context), never from generic percentages. A budget based on someone else's
+  idea of normal is abandoned within two weeks.
+- Use the MEDIAN month, not the average. One holiday or one car repair drags an
+  average up and makes every normal month afterwards look like a failure.
+- Leave fixed costs alone — rent and insurance aren't a daily decision. Take
+  cuts from eating out, shopping and subscriptions first, groceries last.
+- Never set a category to zero. A zero budget is broken on day one.
+- If a category keeps getting overspent, the NUMBER is probably wrong, not the
+  person. Say that, and offer a more realistic figure.
+- Never use shame. Describe what happened and what would help. "You're $40 over
+  on eating out" is useful; implying they lack discipline makes them close the
+  app and not come back.
+- Offer a choice of approaches rather than one prescription, and be honest
+  about which is harder to stick to.
+
 PAYMENT PLANS (AFFIRM / KLARNA / AFTERPAY / PAYPAL PAY IN 4)
 - The app CANNOT sign into these services. They have no public personal API,
   and storing banking credentials in a static site would be a bad trade. Be
@@ -441,6 +458,16 @@ specifics you weren't given.
         amount: { type: "number", description: "Negative = money out" },
       }, required: ["date", "description", "amount"] } },
     }, required: ["transactions"] } },
+    { name: "build_budget", description: "Create or update the user's monthly budget. Base the numbers on their ACTUAL spending from the statement data in context, not on generic advice — a budget built from someone else's idea of normal gets abandoned. Leave fixed costs (Housing, Utilities, Insurance, Debt & BNPL) at what they really are; take any cuts from Eating out, Shopping and Subscriptions first. Never set a category to zero.", input_schema: { type: "object", properties: {
+      categories: { type: "object", description: "Category name -> monthly amount, e.g. {\"Groceries\":600,\"Eating out\":250}" },
+      income: { type: "number" },
+      method: { type: "string", description: "Short label for the approach you took" },
+      notes: { type: "string" },
+    }, required: ["categories"] } },
+    { name: "set_category_budget", description: "Change one category's monthly budget.", input_schema: { type: "object", properties: {
+      category: { type: "string" }, amount: { type: "number" },
+    }, required: ["category", "amount"] } },
+    { name: "get_budget_status", description: "Read how this month is tracking against the budget — real numbers, so you don't have to guess.", input_schema: { type: "object", properties: {} } },
     { name: "add_household_area", description: "Add a new household area/room with a checklist. templateKey can be one of: kitchen, bathroom, livingroom, bedroom, laundry, hvac, safety, yard (uses that area's standard checklist); omit for a blank custom area (optionally provide items).", input_schema: { type: "object", properties: {
       name: { type: "string" }, templateKey: { type: "string" }, recurrence: { type: "string", enum: ["daily", "weekly", "monthly"] },
       items: { type: "array", items: { type: "string" } },
@@ -490,6 +517,9 @@ specifics you weren't given.
   const TOOL_HANDLERS = {
     add_bill: (i) => window.AdultingActions.addBill(i),
     mark_bill_paid: (i) => window.AdultingActions.markBillPaid(i),
+    build_budget: (i) => window.AdultingActions.buildBudget(i),
+    set_category_budget: (i) => window.AdultingActions.setCategoryBudget(i),
+    get_budget_status: () => window.AdultingActions.getBudgetStatus(),
     add_payment_plan: (i) => window.AdultingActions.addPaymentPlan(i),
     mark_payment_plan_paid: (i) => window.AdultingActions.markPaymentPlanPaid(i),
     log_transactions: (i) => window.AdultingActions.logTransactions(i),

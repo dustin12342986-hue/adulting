@@ -1,31 +1,48 @@
-ADULTING  v2026.08.15e
+ADULTING  v2026.08.16a — budgeting + anti-burnout
 
-WHERE FILES GO
+FILES  (two are NEW — budget-engine.js and reentry.js)
   repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
-  js folder:  js/app.js, js/state.js, js/blue-bonnet-widget-organize.js
-  cloudflare-worker.js does NOT go in the repo — paste it into Cloudflare.
+  js folder:  js/app.js
+              js/state.js
+              js/budget-engine.js      <-- NEW
+              js/reentry.js            <-- NEW
+              js/blue-bonnet-widget-organize.js
+  cloudflare-worker.js does NOT go in the repo.
 
 Upload from INSIDE this folder, not the folder itself.
-Hard-refresh, then check the sidebar bottom-left reads v2026.08.15e.
+Sidebar bottom-left should then read v2026.08.16a.
 
-WHY IT LOOKED LIKE IT DIED
-  Progress was shown with a toast, and toasts clear themselves after about
-  three seconds. Each part of a statement takes longer than that, so the
-  message vanished mid-request and the import looked like it had stopped.
-  It probably hadn't.
+BUDGETING  (Budget tab, at the top)
+  Import a statement, then "See my budget options". You get four plans built
+  from YOUR spending, not generic percentages:
+    - Match what I actually spend   (no cuts; a budget you can't fail)
+    - Trim the easy stuff           (eating out, shopping, subscriptions)
+    - Save meaningfully             (a real change you'd notice)
+    - 50/30/20                      (only offered if income is known)
 
-NOW WHILE IT READS
-  A panel stays on screen until the work is actually done, showing:
-    - which part it's on, out of how many
-    - a progress bar and percentage
-    - how many transactions it's found so far
-    - time remaining, based on how long the finished parts actually took
+  Uses the MEDIAN month, not the average, so one car repair doesn't make every
+  normal month look like a failure. Fixed costs (rent, insurance) are never
+  "trimmed" — cuts come from flexible categories, and no category is ever set
+  to zero.
 
-  If a request fails you get a real explanation with the status code — 401/403
-  means the Worker's API key, 429 means rate-limited, 404 means the Worker
-  Proxy URL in Settings is wrong. Parts that succeed are still imported.
+  Once set, the top of Budget shows ONE number: safe to spend today. Any
+  category can be edited inline.
 
-HOW TO USE IT
-  Budget -> Statements -> "Upload statement", pick the PDF, wait for the bar.
-  The paperclip in the Blue Bonnet chat is for asking about a receipt or a
-  single charge — the upload button is what fills in your Budget tab.
+  Blue Bonnet can build and adjust budgets by chat, and read your real numbers
+  to tell you how the month is going.
+
+ANTI-BURNOUT  (the week-2 dropoff)
+  - No streaks. A cumulative count that only goes up and never resets.
+  - Away 4+ days? The dashboard opens with a calm welcome and AT MOST three
+    things, not a wall of red.
+  - Always exactly one "Start here" suggestion, picked for you — usually the
+    nearly-finished thing, because finishing restarts momentum.
+  - "Under two minutes each" list for when starting is the hard part.
+  - "Worth a look" is now "When you have a minute".
+  - If a budget category keeps breaking, the app says the number is probably
+    wrong, not you.
+
+ALSO FIXED
+  A running balance like 4,994.25 has a comma in it, which made the parser
+  treat whole PDF statements as CSV files and return almost nothing. CSV is
+  now detected by structure (a header row or consistent columns) instead.
