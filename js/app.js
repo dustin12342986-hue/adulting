@@ -321,7 +321,7 @@ const TABS = [
    required digging through GitHub's API or a CDN that serves stale copies.
    Showing the version in the app itself makes it a one-second glance instead.
    Bump this whenever you ship a change. */
-const APP_VERSION = "2026.08.16a — budgeting + anti-burnout";
+const APP_VERSION = "2026.08.16b — gateway + brain building mode";
 
 function renderNav() {
   const attn = getAttentionCount();
@@ -1488,6 +1488,7 @@ async function extractStatementWithAI(text, label) {
 
   const all = [];
   const failures = [];
+  let usedBackupExtract = false;
   const startedAt = Date.now();
   for (let i = 0; i < chunks.length; i++) {
     const elapsed = Date.now() - startedAt;
@@ -1520,7 +1521,11 @@ async function extractStatementWithAI(text, label) {
       });
       if (!res.ok) throw new Error("proxy " + res.status);
       const data = await res.json();
-      const textOut = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+      let textOut = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+      if (!textOut && data.choices) {
+        // gateway (OpenAI-shaped) reply
+        textOut = (data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+      }
       const parsed = safeParseJson(textOut);
       (parsed && parsed.transactions ? parsed.transactions : []).forEach((t) => {
         const date = normalizeDate(t.date) || t.date;
@@ -1536,8 +1541,40 @@ async function extractStatementWithAI(text, label) {
         });
       });
     } catch (e) {
-      console.warn("AI extract chunk " + (i + 1) + " failed:", e);
-      failures.push("Part " + (i + 1) + ": " + (e.message || e));
+      /* Anthropic didn't take it — try the gateway for this chunk before
+         giving up. Extraction is strict JSON work, so a free provider may do
+         it less reliably, but a partial import beats no import. */
+      let recovered = false;
+      try {
+        if (typeof BB !== "undefined" && BB.configured()) {
+          const g = await BB.ask(
+            [{ role: "system", content: AI_EXTRACT_SYSTEM },
+             { role: "user", content: "Statement text (part " + (i + 1) + " of " + chunks.length + "):\n\n" + chunks[i] }],
+            { session: "adulting-statements", tier: "balanced", maxTokens: 4000, temperature: 0 }
+          );
+          const parsed = safeParseJson(g.text);
+          (parsed && parsed.transactions ? parsed.transactions : []).forEach((t) => {
+            const date = normalizeDate(t.date) || t.date;
+            const amount = Number(t.amount);
+            if (!date || isNaN(amount)) return;
+            all.push({
+              id: uid("txn"), date,
+              description: maskSensitive(t.name || t.raw || ""),
+              raw: maskSensitive(t.raw || ""),
+              amount,
+              category: STATEMENT_CATEGORIES.includes(t.category) ? t.category : "Other",
+            });
+          });
+          recovered = true;
+          usedBackupExtract = true;
+        }
+      } catch (e2) {
+        console.warn("gateway fallback also failed for part " + (i + 1) + ":", e2);
+      }
+      if (!recovered) {
+        console.warn("AI extract chunk " + (i + 1) + " failed:", e);
+        failures.push("Part " + (i + 1) + ": " + (e.message || e));
+      }
     }
   }
 
@@ -1582,6 +1619,7 @@ async function extractStatementWithAI(text, label) {
   }]);
   persist();
   toast("Read " + fresh.length + " transaction(s) from " + (label || "the statement") +
+        (usedBackupExtract ? " · brain building mode" : "") +
         (failures.length ? " · " + failures.length + " part(s) failed" : ""));
   if (failures.length) {
     console.warn("Some parts failed:", failures);

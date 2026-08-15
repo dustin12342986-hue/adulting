@@ -1,48 +1,56 @@
-ADULTING  v2026.08.16a — budgeting + anti-burnout
+ADULTING  v2026.08.16b — gateway + brain building mode
 
-FILES  (two are NEW — budget-engine.js and reentry.js)
+>>> THE ONE VALUE YOU STILL HAVE TO FILL IN <<<
+
+  File:  js/blue-bonnet-widget-organize.js
+  Line:  43
+  Now:   const KEY     = "PUT_YOUR_GATEWAY_KEY_HERE";
+  Do:    replace PUT_YOUR_GATEWAY_KEY_HERE with your gateway key,
+         keeping the quotes.
+
+  Nothing else needs editing. The gateway URL and app name are already set.
+
+FILES
   repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
   js folder:  js/app.js
               js/state.js
-              js/budget-engine.js      <-- NEW
-              js/reentry.js            <-- NEW
-              js/blue-bonnet-widget-organize.js
+              js/budget-engine.js
+              js/reentry.js
+              js/blue-bonnet-widget-organize.js   <-- the key goes in this one
   cloudflare-worker.js does NOT go in the repo.
 
 Upload from INSIDE this folder, not the folder itself.
-Sidebar bottom-left should then read v2026.08.16a.
+Sidebar bottom-left should read v2026.08.16b.
 
-BUDGETING  (Budget tab, at the top)
-  Import a statement, then "See my budget options". You get four plans built
-  from YOUR spending, not generic percentages:
-    - Match what I actually spend   (no cuts; a budget you can't fail)
-    - Trim the easy stuff           (eating out, shopping, subscriptions)
-    - Save meaningfully             (a real change you'd notice)
-    - 50/30/20                      (only offered if income is known)
+HOW THE TWO PROVIDERS SPLIT
+  Anthropic is tried FIRST, because it's the only one that supports this app's
+  tools — the things that let Blue Bonnet actually add a bill, build a budget
+  or log transactions instead of just talking about them.
 
-  Uses the MEDIAN month, not the average, so one car repair doesn't make every
-  normal month look like a failure. Fixed costs (rent, insurance) are never
-  "trimmed" — cuts come from flexible categories, and no category is ever set
-  to zero.
+  If that call fails for ANY reason (out of credit, rate limited, Worker down,
+  offline), the same question is retried on your gateway automatically. The
+  reply still arrives, labelled:
 
-  Once set, the top of Budget shows ONE number: safe to spend today. Any
-  category can be edited inline.
+    "Brain building mode — this one ran on your own gateway, which is what
+     trains it over time. I can talk things through here, but I can't change
+     anything in the app until the main line is back."
 
-  Blue Bonnet can build and adjust budgets by chat, and read your real numbers
-  to tell you how the month is going.
+  So you're never stuck without an assistant, and it never pretends to have
+  done something it couldn't.
 
-ANTI-BURNOUT  (the week-2 dropoff)
-  - No streaks. A cumulative count that only goes up and never resets.
-  - Away 4+ days? The dashboard opens with a calm welcome and AT MOST three
-    things, not a wall of red.
-  - Always exactly one "Start here" suggestion, picked for you — usually the
-    nearly-finished thing, because finishing restarts momentum.
-  - "Under two minutes each" list for when starting is the hard part.
-  - "Worth a look" is now "When you have a minute".
-  - If a budget category keeps breaking, the app says the number is probably
-    wrong, not you.
+  Statement extraction works the same way: Anthropic first, gateway if that
+  fails, and the toast says "brain building mode" when the backup was used.
 
-ALSO FIXED
-  A running balance like 4,994.25 has a comma in it, which made the parser
-  treat whole PDF statements as CSV files and return almost nothing. CSV is
-  now detected by structure (a header row or consistent columns) instead.
+THUMBS UP / DOWN
+  Small and grey under each reply, no colour until you press one, no prompting.
+  On gateway replies the rating goes back as training data. On Anthropic
+  replies it's kept locally so it isn't thrown away.
+
+A NOTE ON YOUR INSTRUCTIONS
+  The brief said Adulting is a single-file HTML PWA. It isn't — that's
+  Businessing. Adulting is multi-file, so the BB client went inline at the top
+  of js/blue-bonnet-widget-organize.js, which is where the API calls actually
+  live. Same effect, no extra file.
+
+  Your key will be visible in page source, which is expected and fine given
+  the gateway's origin lock. Nothing was done to hide it.

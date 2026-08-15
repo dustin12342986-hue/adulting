@@ -28,6 +28,114 @@
       Bonnet still works fine as a pure expert-advice assistant.
    =========================================================== */
 
+
+/* ===========================================================================
+   BLUE BONNET CLIENT — gateway (Groq / Gemini, with failover + logging)
+
+   Fill in KEY below. That's the only edit needed in this file.
+
+   The key is visible in page source. That's expected: the gateway only
+   accepts browser requests from https://dustin12342986-hue.github.io, so a
+   copied key is useless anywhere else.
+   =========================================================================== */
+const BB = (() => {
+  const GATEWAY = "https://blue-bonnet-gateway.dustin12342986.workers.dev";
+  const KEY     = "PUT_YOUR_GATEWAY_KEY_HERE";   // <-- the only edit needed
+  const APP     = "adulting";
+
+  let lastInteractionId = null;
+
+  async function ask(messages, opts) {
+    opts = opts || {};
+    const res = await fetch(GATEWAY + "/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + KEY,
+        "x-app": APP,
+        "x-session": opts.session || "default",
+      },
+      body: JSON.stringify({
+        messages,
+        tier: opts.tier || "balanced",
+        temperature: opts.temperature != null ? opts.temperature : 0.7,
+        max_tokens: opts.maxTokens != null ? opts.maxTokens : 1024,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data && data.error && data.error.message) || "gateway error");
+    lastInteractionId = (data.bb && data.bb.interaction_id) || null;
+    return {
+      text: (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "",
+      interactionId: lastInteractionId,
+      provider: data.bb && data.bb.provider,
+    };
+  }
+
+  async function rate(rating, note, interactionId) {
+    const id = interactionId || lastInteractionId;
+    if (!id) return false;
+    try {
+      await fetch(GATEWAY + "/v1/feedback", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer " + KEY },
+        body: JSON.stringify({ interaction_id: id, rating, note }),
+      });
+      return true;
+    } catch (e) { return false; }  // feedback is best-effort, never block the UI
+  }
+
+  function configured() { return KEY !== "PUT_YOUR_GATEWAY_KEY_HERE" && !!KEY; }
+
+  return { ask, rate, configured };
+})();
+
+/* ---------------------------------------------------------------------------
+   Routing: Anthropic first, gateway as the safety net.
+
+   Anthropic is tried first because it's the only one of the two that supports
+   this app's TOOLS — the things that let Blue Bonnet actually add a bill,
+   build a budget or log transactions rather than just talk about them.
+
+   If that call fails for any reason (out of credit, rate limited, Worker down,
+   network), the same question is retried on the gateway. The reply still
+   arrives; it just can't change anything in the app, and it says so rather
+   than quietly pretending nothing happened.
+   --------------------------------------------------------------------------- */
+async function bbCallAnthropic(proxyUrl, body) {
+  const res = await fetch(proxyUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    const err = new Error("anthropic " + res.status + (t ? ": " + t.slice(0, 200) : ""));
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+/* Convert Anthropic-style messages to the plain OpenAI shape the gateway
+   wants. Tool traffic can't survive the trip, so it's summarised as text
+   rather than dropped silently. */
+function bbToPlainMessages(system, messages) {
+  const out = [{ role: "system", content: system }];
+  (messages || []).forEach((m) => {
+    if (typeof m.content === "string") { out.push({ role: m.role, content: m.content }); return; }
+    const parts = (m.content || []).map((b) => {
+      if (b.type === "text") return b.text;
+      if (b.type === "tool_use") return "[asked the app to " + b.name + "]";
+      if (b.type === "tool_result") return "[app replied: " + String(b.content).slice(0, 300) + "]";
+      if (b.type === "image") return "[image attached — not available on the backup provider]";
+      return "";
+    }).filter(Boolean);
+    if (parts.length) out.push({ role: m.role, content: parts.join("\n") });
+  });
+  return out;
+}
+
 (function () {
   const PROXY_URL_FALLBACK = "PASTE_YOUR_ADULTING_WORKER_URL_HERE";
 
@@ -879,7 +987,45 @@ specifics you weren't given.
     bubble.innerHTML = `<img src="${LOGO_SRC}" alt="Blue Bonnet"/>`;
   }
 
-  function renderMessage(role, rawText) {
+  /* Quiet thumbs. Deliberately small, no prompting, no nagging, no colour
+     until you press one — it should be completely ignorable. Ratings on
+     gateway replies go back as training data; ratings on Anthropic replies
+     are kept locally so they aren't simply thrown away. */
+  function addFeedback(row, interactionId) {
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;gap:6px;margin-top:4px;opacity:0.35;font-size:12px";
+    bar.onmouseenter = () => { bar.style.opacity = "0.8"; };
+    bar.onmouseleave = () => { if (!bar.dataset.rated) bar.style.opacity = "0.35"; };
+
+    const mk = (glyph, rating, title) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = glyph;
+      b.title = title;
+      b.style.cssText = "background:none;border:none;cursor:pointer;padding:2px 4px;font-size:12px;line-height:1;color:inherit";
+      b.onclick = () => {
+        if (bar.dataset.rated) return;
+        bar.dataset.rated = "1";
+        bar.style.opacity = "1";
+        bar.textContent = rating > 0 ? "thanks — noted" : "noted, I'll do better";
+        bar.style.fontSize = "11px";
+        try {
+          if (interactionId) BB.rate(rating, null, interactionId);
+          else if (window.STATE) {
+            window.STATE.settings.localRatings = (window.STATE.settings.localRatings || []).slice(-49);
+            window.STATE.settings.localRatings.push({ at: new Date().toISOString(), rating });
+            if (typeof window.saveState === "function") window.saveState(window.STATE);
+          }
+        } catch (e) { /* feedback must never break the chat */ }
+      };
+      return b;
+    };
+    bar.appendChild(mk("👍", 1, "This helped"));
+    bar.appendChild(mk("👎", -1, "This missed"));
+    row.appendChild(bar);
+  }
+
+  function renderMessage(role, rawText, interactionId) {
     const empty = document.getElementById("bb-empty-state");
     if (empty) empty.remove();
     const { cleanText, gotoId, gotoLabel } = role === "assistant" ? extractGoto(rawText) : { cleanText: rawText, gotoId: null };
@@ -895,6 +1041,9 @@ specifics you weren't given.
       goBtn.textContent = (gotoLabel || "Take me there") + " \u2192";
       goBtn.onclick = () => goToAppTab(gotoId);
       row.appendChild(goBtn);
+    }
+    if (role === "assistant" && !/^thinking|^doing that/.test(String(rawText || ""))) {
+      addFeedback(row, interactionId);
     }
     bodyEl.appendChild(row);
     bodyEl.scrollTop = bodyEl.scrollHeight;
@@ -973,18 +1122,36 @@ specifics you weren't given.
       const systemPrompt = `You are Blue Bonnet, the organizing assistant built into Adulting — a household app built primarily for ADHD, autistic, and other neurodivergent users. Keep answers short, concrete, and encouraging. Never shame a messy space, a missed bill, or a broken streak. Give one clear next step by default, not a long plan, unless asked for more. Use the expert knowledge base below as your foundation.\n\nWhen — and only when — pointing the user at a specific part of the app is genuinely the most useful next step, end your reply with exactly one line in this exact format: [[goto:ID|Short label]] using one of these ids: dashboard, budget, household, groceries, vehicles, travel, settings, board (see NAVIGATING ADULTING in the knowledge base for what each contains). This renders as a real button, so never mention the format itself to the user, never use it more than once per reply, and skip it entirely on replies where no single tab is the obvious next step.${checkInMode ? "\n\nThis particular message is a PROACTIVE CHECK-IN you are initiating, not something the user asked — they haven't said anything. Keep it very short (1-2 sentences), warm, low-pressure, and specific to the live data below if there's anything worth mentioning. If nothing stands out, a brief, genuine 'no pressure, just checking in' is perfectly fine — don't invent urgency that isn't there. Do not use any tools during a check-in — notice and mention things, don't act on them unasked." : "\n\nYou also have tools to actually perform actions in the app when the user clearly wants something done, not just discussed (add a bill, check off a chore, log groceries, mark maintenance done, create a trip, etc.). Ask for missing required details rather than guessing — never invent an amount, date, or name. After a tool call, confirm briefly in your own words; don't repeat raw data back. Don't chain more than 2-3 tool calls in a row without pausing to summarize what you did."}\n\nKNOWLEDGE BASE:\n${ADULTING_KB}${liveContext ? "\n\nLIVE HOUSEHOLD DATA:\n" + liveContext : "\n\n(No live household data available — window.STATE wasn't found, so answer from general expertise only.)"}`;
 
       let finalText = "";
+      let usedBackup = false;
+      let gatewayInteractionId = null;
       const MAX_ROUNDS = 4;
       for (let round = 0; round < MAX_ROUNDS; round++) {
-        const res = await fetch(proxyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(Object.assign(
+        let data;
+        try {
+          data = await bbCallAnthropic(proxyUrl, Object.assign(
             { max_tokens: 1000, system: systemPrompt, messages: messages },
             checkInMode ? {} : { tools: TOOLS }
-          )),
-        });
-        const data = await res.json();
-        if (data && data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+          ));
+          if (data && data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+        } catch (primaryErr) {
+          /* Anthropic didn't answer — out of credit, rate limited, Worker down,
+             offline. Rather than failing, ask the gateway the same question.
+             It can't run tools, so the reply is advice-only and says so. */
+          console.warn("Blue Bonnet primary failed, trying gateway:", primaryErr);
+          if (!BB.configured()) throw primaryErr;
+
+          loadingRow.querySelector("#bb-loading").textContent = "brain building mode...";
+          const plain = bbToPlainMessages(systemPrompt +
+            "\n\nIMPORTANT: on this provider you cannot perform actions in the app — no adding bills, " +
+            "no building budgets, no logging transactions. Answer the question directly and, if something " +
+            "needs doing, tell the user which tab to do it in. Don't claim to have done anything.",
+            messages);
+          const g = await BB.ask(plain, { session: "adulting-chat", tier: "balanced", maxTokens: 900 });
+          usedBackup = true;
+          gatewayInteractionId = g.interactionId;
+          finalText = g.text;
+          break;
+        }
         const contentBlocks = data.content || [];
         messages.push({ role: "assistant", content: contentBlocks });
 
