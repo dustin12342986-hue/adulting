@@ -679,27 +679,185 @@ function renderStatementSection() {
     '<div class="card" style="margin-bottom:12px">' +
       '<div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">' +
         '<label class="btn-primary" style="cursor:pointer">📄 Upload statement<input type="file" accept=".pdf,.csv,.txt,.tsv" id="statementFile" style="display:none" /></label>' +
+        (txns.length ? '<button class="btn-primary" data-action="charge-tracker" style="background:#7c3fd6">🔍 Charge Tracker</button>' : "") +
         '<button class="btn-sm" data-action="open-statement-paste">📋 Paste text instead</button>' +
         (txns.length ? '<button class="btn-sm btn-danger" data-action="clear-statement-txns">Clear all transactions</button>' : "") +
       "</div>" +
       '<div class="hint muted small">PDF and CSV both work. Scanned/photographed statements have no text to read — use your bank\'s CSV export for those. If the layout is unusual, Blue Bonnet can read a pasted statement and log it for you.</div>' +
     "</div>" +
-    (txns.length
-      ? '<div class="grid" style="margin-bottom:12px">' +
-          '<div class="card"><div class="muted small">Money out</div><div style="font-size:22px;font-weight:800">' + fmtMoney(spent) + "</div></div>" +
-          '<div class="card"><div class="muted small">Money in</div><div style="font-size:22px;font-weight:800">' + fmtMoney(inflow) + "</div></div>" +
-          '<div class="card"><div class="muted small">Transactions</div><div style="font-size:22px;font-weight:800">' + txns.length + "</div></div>" +
-        "</div>" +
-        (imports.length ? '<div class="muted small" style="margin-bottom:8px">Imported: ' + imports.map((i) => escapeHtml(i.label) + " (" + i.count + ")").join(" · ") + "</div>" : "") +
-        '<div class="card"><table><thead><tr><th>Date</th><th>Description</th><th>Amount</th></tr></thead><tbody>' +
-        recent.map((t) =>
-          "<tr><td class=\"muted small\">" + escapeHtml(t.date || "") + "</td>" +
-          "<td>" + escapeHtml(t.description || "") + "</td>" +
-          '<td style="color:' + (Number(t.amount) < 0 ? "var(--danger,#c23b3b)" : "#1f8a5f") + '">' + fmtMoney(t.amount) + "</td></tr>"
-        ).join("") + "</tbody></table>" +
-        (txns.length > 25 ? '<div class="muted small" style="margin-top:8px">Showing 25 most recent of ' + txns.length + ".</div>" : "") +
-        "</div>"
-      : emptyState("🏦", "No statement data yet", "Upload a CSV or paste a statement to see your transactions here."));
+    (txns.length ? renderStatementTabs(txns, imports, recent, spent, inflow)
+      : emptyState("🏦", "No statement data yet", "Upload a statement PDF or CSV and the app will pick out what's recurring."));
+}
+
+/* The point of importing a statement isn't to re-read the statement — it's to
+   see what keeps coming out and when the next one lands. So Recurring is the
+   default view and the raw rows sit behind a tab for when you need them. */
+let statementView = "recurring"; // recurring | all
+
+function renderStatementTabs(txns, imports, recent, spent, inflow) {
+  const recurring = detectRecurring(txns);
+  const monthlyish = recurring.filter((r) => r.regular)
+    .reduce((s, r) => s + (r.typical * (30 / Math.max(1, r.interval))), 0);
+
+  const tabs =
+    '<div class="row" style="gap:6px;margin-bottom:12px">' +
+      '<button class="btn-sm' + (statementView === "recurring" ? " btn-primary" : "") + '" data-action="statement-view" data-id="recurring">🔁 Recurring (' + recurring.length + ")</button>" +
+      '<button class="btn-sm' + (statementView === "all" ? " btn-primary" : "") + '" data-action="statement-view" data-id="all">All transactions (' + txns.length + ")</button>" +
+    "</div>";
+
+  if (statementView === "all") {
+    return tabs +
+      '<div class="grid" style="margin-bottom:12px">' +
+        '<div class="card"><div class="muted small">Money out</div><div style="font-size:22px;font-weight:800">' + fmtMoney(spent) + "</div></div>" +
+        '<div class="card"><div class="muted small">Money in</div><div style="font-size:22px;font-weight:800">' + fmtMoney(inflow) + "</div></div>" +
+        '<div class="card"><div class="muted small">Transactions</div><div style="font-size:22px;font-weight:800">' + txns.length + "</div></div>" +
+      "</div>" +
+      (imports.length ? '<div class="muted small" style="margin-bottom:8px">Imported: ' + imports.map((i) => escapeHtml(i.label) + " (" + i.count + ")").join(" · ") + "</div>" : "") +
+      '<div class="card"><table><thead><tr><th>Date</th><th>What it was</th><th>Amount</th></tr></thead><tbody>' +
+      recent.map((t) =>
+        '<tr><td class="muted small">' + escapeHtml(t.date || "") + "</td>" +
+        "<td><strong>" + escapeHtml(cleanMerchant(t.description)) + "</strong>" +
+        '<div class="muted small">' + escapeHtml(t.description || "") + "</div></td>" +
+        '<td style="color:' + (Number(t.amount) < 0 ? "var(--danger,#c23b3b)" : "#1f8a5f") + '">' + fmtMoney(t.amount) + "</td></tr>"
+      ).join("") + "</tbody></table>" +
+      (txns.length > 25 ? '<div class="muted small" style="margin-top:8px">Showing 25 most recent of ' + txns.length + ".</div>" : "") +
+      "</div>";
+  }
+
+  if (!recurring.length) {
+    return tabs + emptyState("🔁", "Nothing repeating yet",
+      "Recurring charges show up once the same merchant appears twice. Import another month and they'll appear.");
+  }
+
+  const soon = recurring.filter((r) => r.regular && r.nextDate <= addDaysISO(todayISO(), 14));
+
+  return tabs +
+    '<div class="grid" style="margin-bottom:14px">' +
+      '<div class="card"><div class="muted small">Repeating charges</div><div style="font-size:22px;font-weight:800">' + recurring.filter((r) => r.regular).length + "</div></div>" +
+      '<div class="card"><div class="muted small">Roughly per month</div><div style="font-size:22px;font-weight:800">' + fmtMoney(monthlyish) + "</div></div>" +
+      '<div class="card"><div class="muted small">Due in next 2 weeks</div><div style="font-size:22px;font-weight:800">' + fmtMoney(soon.reduce((s, r) => s + r.typical, 0)) + "</div></div>" +
+    "</div>" +
+    '<div class="card"><table><thead><tr><th>What</th><th>How often</th><th>Amount</th><th>Next expected</th><th></th></tr></thead><tbody>' +
+    recurring.map((r) =>
+      "<tr>" +
+        "<td><strong>" + escapeHtml(r.name) + "</strong>" +
+          '<div class="muted small">seen ' + r.count + " time(s) · last " + fmtDate(r.lastDate) + "</div></td>" +
+        "<td>" + escapeHtml(r.cadence) +
+          (r.regular ? "" : '<div class="muted small">irregular — timing is a guess</div>') + "</td>" +
+        "<td>" + fmtMoney(r.typical) + "</td>" +
+        "<td>" + (r.regular ? fmtDate(r.nextDate) + '<div class="muted small">' + fmtRelativeDays(r.nextDate) + "</div>"
+                            : '<span class="muted small">~' + fmtDate(r.nextDate) + "</span>") + "</td>" +
+        '<td><button class="btn-sm" data-action="recurring-to-bill" data-id="' + encodeURIComponent(r.name) + '" title="Track this as a bill">+ Bill</button></td>' +
+      "</tr>").join("") +
+    "</tbody></table>" +
+    '<div class="muted small" style="margin-top:10px">Next dates are worked out from the gaps between past charges, not from the merchant — treat them as a good estimate, not a promise.</div>' +
+    "</div>";
+}
+
+/* ---------------------------------------------------------------------------
+   Recurring payment detection
+
+   The useful question isn't "what did I spend" — it's "what keeps coming out,
+   and when's the next one." Statement descriptions are hostile to that:
+     "STARBUCKS STORE 00123 DALLAS TX"
+     "SHELL OIL 57442100 PLANO TX"
+   Same merchant, different store number every time. So strip the noise down to
+   a stable name, group by it, and look at the gaps between charges.
+   --------------------------------------------------------------------------- */
+
+// Turn a raw statement description into a readable merchant name.
+function cleanMerchant(desc) {
+  let s = String(desc || "").toUpperCase();
+  s = s.replace(/••••\d+/g, " ");                    // already-masked numbers
+  s = s.replace(/\b(CARD|ACCT|ACCOUNT|REF|ID|TRACE|PPD|CCD|WEB|POS|DEBIT|CREDIT)\b\s*#?\s*\d*/g, " ");
+  s = s.replace(/\bSTORE\s*#?\s*\d+/g, " ");
+  s = s.replace(/#\s*\d+/g, " ");                    // store numbers
+  s = s.replace(/\b\d{4,}\b/g, " ");                 // long digit runs
+  s = s.replace(/\b[A-Z]{2}\b(?=\s*$)/g, " ");       // trailing state code
+  s = s.replace(/\b(DALLAS|PLANO|FRISCO|AUSTIN|HOUSTON|IRVING|ARLINGTON|DENTON|GARLAND|MCKINNEY)\b/g, " ");
+  s = s.replace(/\b(PURCHASE|PAYMENT|PMTS?|BILL PAY|AUTOPAY|RECURRING|ONLINE|WWW\.?|COM)\b/g, " ");
+  s = s.replace(/[^A-Z0-9&' ]+/g, " ").replace(/\s+/g, " ").trim();
+  // Keep it to the first few meaningful words — that's the merchant
+  const words = s.split(" ").filter(Boolean).slice(0, 3);
+  return words.join(" ") || String(desc || "").trim();
+}
+
+function medianOf(nums) {
+  if (!nums.length) return 0;
+  const s = nums.slice().sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
+}
+
+function cadenceLabel(days) {
+  if (days <= 2) return "Daily-ish";
+  if (days <= 9) return "Weekly";
+  if (days <= 17) return "Every 2 weeks";
+  if (days <= 24) return "Twice a month";
+  if (days <= 45) return "Monthly";
+  if (days <= 100) return "Quarterly";
+  if (days <= 200) return "Twice a year";
+  return "Yearly";
+}
+
+/* Find merchants charged more than once and work out their rhythm.
+   Only outgoing money — incoming deposits aren't "payments". */
+function detectRecurring(txns) {
+  const groups = new Map();
+  (txns || []).forEach((t) => {
+    if (Number(t.amount) >= 0) return;
+    const key = cleanMerchant(t.description);
+    if (!key) return;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  });
+
+  const out = [];
+  groups.forEach((list, name) => {
+    if (list.length < 2) return;
+    list.sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    // Gaps between charges, ignoring same-day repeats (two coffees ≠ a cycle)
+    const gaps = [];
+    for (let i = 1; i < list.length; i++) {
+      const g = daysBetween(list[i - 1].date, list[i].date);
+      if (g > 0) gaps.push(g);
+    }
+    if (!gaps.length) return;
+
+    const interval = medianOf(gaps);
+    if (interval < 1) return;
+
+    const amounts = list.map((t) => Math.abs(Number(t.amount)));
+    const typical = medianOf(amounts.map((a) => Math.round(a * 100))) / 100;
+
+    // How regular is it? Gaps close to the median = a real subscription.
+    const spread = gaps.length > 1
+      ? gaps.reduce((s, g) => s + Math.abs(g - interval), 0) / gaps.length
+      : 0;
+    const regular = spread <= Math.max(3, interval * 0.25);
+
+    const last = list[list.length - 1];
+    out.push({
+      name,
+      count: list.length,
+      typical,
+      total: amounts.reduce((s, a) => s + a, 0),
+      interval,
+      cadence: cadenceLabel(interval),
+      regular,
+      lastDate: last.date,
+      lastDescription: last.description,
+      nextDate: addDaysISO(last.date, interval),
+    });
+  });
+
+  // Regular ones first, then soonest, then biggest
+  return out.sort((a, b) => {
+    if (a.regular !== b.regular) return a.regular ? -1 : 1;
+    if (a.nextDate !== b.nextDate) return a.nextDate < b.nextDate ? -1 : 1;
+    return b.typical - a.typical;
+  });
 }
 
 /* Reduce anything that looks like a full account/card number to its last 4.
@@ -763,19 +921,62 @@ function parseStatementText(text) {
     return rows;
   }
 
-  // Loose text: "08/12/2026  STARBUCKS #123   -5.75"
-  // The parentheses are INSIDE the capture group on purpose — statements write
-  // negatives as (42.10), and if the parens are captured outside the group the
-  // minus sign gets silently dropped and money-out looks like money-in.
-  const re = /^(\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?|\d{4}-\d{2}-\d{2})\s+(.*?)\s+(\(?-?\$?[\d,]+\.\d{2}\)?)$/;
+  /* Loose statement text — the format real bank PDFs produce.
+
+     Three things here caused real, silent data loss and are handled on purpose:
+
+     1. RUNNING BALANCE COLUMN. Most statements print
+          08/01  STARBUCKS  -5.75  4,994.25
+        Anchoring the amount to the end of the line captures the BALANCE, so
+        every transaction gets the wrong number. Instead: grab ALL money-looking
+        tokens at the end of the line. Two means amount-then-balance, so take
+        the first and throw the balance away.
+
+     2. UNSIGNED AMOUNTS UNDER SECTION HEADINGS. Statements often split into
+        "DEPOSITS AND ADDITIONS" and "WITHDRAWALS", printing every amount
+        positive and leaving the sign implied. Track the last heading seen and
+        apply it when a row has no explicit sign.
+
+     3. WRAPPED DESCRIPTIONS. A continuation line ("WA CARD 1234") has no date
+        and no amount; it belongs to the row above, not to nothing. */
+  const MONEY = "\\(?-?\\$?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})\\)?|\\(?-?\\$?\\d+\\.\\d{2}\\)?";
+  const re = new RegExp(
+    "^(\\d{1,2}[\\/-]\\d{1,2}(?:[\\/-]\\d{2,4})?|\\d{4}-\\d{2}-\\d{2})\\s+" + // date
+    "(.*?)\\s+" +                                                              // description
+    "(" + MONEY + ")" +                                                        // amount
+    "(?:\\s+(" + MONEY + "))?\\s*$"                                            // optional balance
+  );
+
+  let sectionSign = 0; // +1 deposits, -1 withdrawals, 0 unknown
   for (const line of lines) {
+    // Section headings
+    if (/^[^\d]{4,}$/.test(line)) {
+      if (/deposit|credit|addition|payment received|income/i.test(line)) sectionSign = 1;
+      else if (/withdraw|debit|charge|purchase|payment|fee/i.test(line)) sectionSign = -1;
+    }
+    // Column headers and page furniture
+    if (/^(date|posted)\b.*\b(description|amount|balance)\b/i.test(line)) continue;
+    if (/^page \d+/i.test(line)) continue;
+
     const m = line.match(re);
-    if (!m) continue;
+    if (!m) {
+      // Continuation of the previous description (no date, no amount, short)
+      if (rows.length && !/\d{1,2}[\/-]\d{1,2}/.test(line) && line.length < 60 && !new RegExp(MONEY).test(line)) {
+        const prev = rows[rows.length - 1];
+        prev.description = maskSensitive((prev.description + " " + line).trim());
+      }
+      continue;
+    }
     const date = normalizeDate(m[1]);
     if (!date) continue;
-    let amount = parseMoney(m[3]);
-    if (/\(.*\)/.test(m[3])) amount = -Math.abs(amount); // (12.34) means money out
+
+    const raw = m[3];
+    let amount = parseMoney(raw);
     if (isNaN(amount)) continue;
+    if (/\(.*\)/.test(raw)) amount = -Math.abs(amount);          // (12.34) = money out
+    else if (!/^-|^\(|-\$/.test(raw.trim()) && sectionSign) {     // no sign of its own
+      amount = sectionSign * Math.abs(amount);
+    }
     rows.push({ id: uid(), date, description: maskSensitive(m[2]), amount });
   }
   return rows;
@@ -891,9 +1092,23 @@ function importStatementText(text, label) {
     toast("Couldn't find any transactions in that. Try a CSV export, or paste the statement text.");
     return 0;
   }
-  // Skip rows already imported (same date + description + amount).
-  const seen = new Set((STATE.statementTxns || []).map((t) => t.date + "|" + t.description + "|" + t.amount));
-  const fresh = rows.filter((r) => !seen.has(r.date + "|" + r.description + "|" + r.amount));
+  /* De-duplicate by COUNT, not by presence.
+
+     Buying coffee twice at the same shop on the same day produces two
+     genuinely identical rows, and a plain Set silently threw the second one
+     away — real money vanishing from the totals. So count how many times each
+     identical row already exists and only skip that many.  */
+  const counts = new Map();
+  (STATE.statementTxns || []).forEach((t) => {
+    const k = t.date + "|" + t.description + "|" + t.amount;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  });
+  const fresh = rows.filter((r) => {
+    const k = r.date + "|" + r.description + "|" + r.amount;
+    const remaining = counts.get(k) || 0;
+    if (remaining > 0) { counts.set(k, remaining - 1); return false; }
+    return true;
+  });
   STATE.statementTxns = (STATE.statementTxns || []).concat(fresh);
   STATE.statementImports = (STATE.statementImports || []).concat([{
     id: uid(), label: label || "Statement", count: fresh.length, importedAt: Date.now(),
@@ -902,6 +1117,72 @@ function importStatementText(text, label) {
   const dupes = rows.length - fresh.length;
   toast("Imported " + fresh.length + " transaction(s)" + (dupes ? " · skipped " + dupes + " already there" : ""));
   return fresh.length;
+}
+
+/* Charge Tracker
+
+   Hands the whole transaction list to Blue Bonnet and asks for a proper
+   walk-through: categorised, biggest first, with the small-but-frequent stuff
+   called out — that's the spending people genuinely can't see, because no
+   single charge looks like anything.
+
+   The list is sent already masked (masking happens at import), and it's the
+   user's own Worker, so nothing goes anywhere new. */
+function runChargeTracker() {
+  const txns = STATE.statementTxns || [];
+  if (!txns.length) { toast("Import a statement first."); return; }
+  if (!window.BlueBonnet) { toast("Blue Bonnet isn't loaded on this page."); return; }
+  if (!window.BlueBonnet.isConfigured || !window.BlueBonnet.isConfigured()) {
+    toast("Set your Worker Proxy URL in Settings → Blue Bonnet first.");
+    return;
+  }
+
+  // Newest first, capped — a year of transactions would blow the context and
+  // cost real money for no extra insight.
+  const list = txns.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 300);
+  const spent = list.filter((t) => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+  const inflow = list.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const span = list.length ? (list[list.length - 1].date + " to " + list[0].date) : "";
+
+  const lines = list.map((t) => t.date + "  " + t.description + "  " + Number(t.amount).toFixed(2));
+
+  const prompt =
+    "Walk me through where my money is going. Here are my transactions (" +
+    list.length + " of them, " + span + "). Negative = money out.\n\n" +
+    lines.join("\n") +
+    "\n\nTotal out: " + fmtMoney(spent) + ". Total in: " + fmtMoney(inflow) + ".\n\n" +
+    "Please:\n" +
+    "1. Sort everything into plain-English categories (housing, transport, food/groceries, eating out, subscriptions, debt/BNPL, one-offs, etc). Give the total and the % of spending for each, biggest first.\n" +
+    "2. Inside each category, name the specific merchants and what they actually are, so I know what the cryptic ones were.\n" +
+    "3. Call out anything that repeats — subscriptions and small recurring charges especially. Small-and-frequent is the stuff I can't see on my own.\n" +
+    "4. Flag anything that looks like a duplicate charge, a fee, or something I might have forgotten I'm paying for.\n" +
+    "5. Finish with the two or three things that would actually make a difference, in order of impact. Be concrete about amounts.\n\n" +
+    "Keep it readable — I'm trying to learn how to handle a lot of transactions, not just be handed a number. Don't lecture me about spending; just show me clearly what's there.";
+
+  window.BlueBonnet.ask(prompt);
+}
+
+/* Turn a detected recurring charge into a real tracked bill. */
+function recurringToBill(name) {
+  const r = detectRecurring(STATE.statementTxns || []).find((x) => x.name === name);
+  if (!r) { toast("Couldn't find that one — try importing again."); return; }
+  if (STATE.bills.some((b) => b.name.toLowerCase() === r.name.toLowerCase())) {
+    toast("You're already tracking " + r.name + " as a bill.");
+    return;
+  }
+  STATE.bills.push({
+    id: uid("bill"),
+    name: r.name,
+    amount: Number(r.typical) || 0,
+    dueDay: Number((r.nextDate || todayISO()).slice(8, 10)) || 1,
+    type: r.interval >= 25 ? "regular" : "discretionary",
+    category: r.interval >= 25 ? "Other Regular" : "Other Discretionary",
+    recurring: true,
+    paidPeriods: {},
+    calendarEventId: null,
+  });
+  persist();
+  toast("Now tracking " + r.name + " as a bill (" + fmtMoney(r.typical) + ")");
 }
 
 function openStatementPasteModal(prefill) {
@@ -1932,6 +2213,9 @@ function handleAction(el, e) {
       }
       break;
     case "open-statement-paste": openStatementPasteModal(); break;
+    case "statement-view": statementView = id; render(); break;
+    case "charge-tracker": runChargeTracker(); break;
+    case "recurring-to-bill": recurringToBill(decodeURIComponent(id)); break;
     case "clear-statement-txns":
       if (confirm("Clear all imported transactions? Your bills and payment plans aren't affected.")) {
         STATE.statementTxns = [];

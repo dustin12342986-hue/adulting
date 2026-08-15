@@ -1,29 +1,41 @@
-ADULTING — BUDGET UPDATE v2  (PDF statements + Blue Bonnet attachments)
+ADULTING — BUDGET UPDATE v3
+Statement parser fixes + Recurring view + Charge Tracker
 
 Upload these 4 files to  github.com/dustin12342986-hue/adulting
-keeping the same folder structure:
+keeping the folder structure:
 
-  index.html                          -> repo root         (2,450 bytes)
-  js/app.js                           -> js/ folder      (146,109 bytes)
-  js/state.js                         -> js/ folder        (9,599 bytes)
-  js/blue-bonnet-widget-organize.js   -> js/ folder      (113,028 bytes)
+  index.html                          -> repo root
+  js/app.js                           -> js/
+  js/state.js                         -> js/
+  js/blue-bonnet-widget-organize.js   -> js/
 
-CHECK YOU HAVE THE RIGHT ONES  (search inside each file)
-  index.html  ... v=20260815a
-  app.js      ... extractPdfText
+CHECK YOU HAVE THE RIGHT ONES (search inside each)
+  index.html  ... v=20260815b
+  app.js      ... detectRecurring
   state.js    ... bnplPlans
-  blue-bonnet ... bb-attach
+  blue-bonnet ... window.BlueBonnet
 
-NEW IN THIS ROUND
-  PDF statements       Budget -> Statements -> "Upload statement" now takes
-                       PDFs straight from your bank. Read in your browser
-                       with pdf.js; the file is never uploaded or stored.
-  Blue Bonnet uploads  Paperclip in the chat. Attach PDFs, CSVs, photos and
-                       screenshots, or just drag them onto the panel. Photos
-                       go as real images so it can look at them.
-  Fallback             If a PDF layout isn't recognized, the extracted text
-                       opens in the paste box so nothing dead-ends.
+WHY YOUR STATEMENTS LOOKED HALF-READ
+  Not the page count — all pages were being read. Three parsing bugs were
+  dropping or corrupting rows:
+    1. Running BALANCE column was being taken as the transaction amount, so
+       amounts were wrong on any statement with a balance column.
+    2. Sections like "DEPOSITS AND ADDITIONS" print amounts unsigned; those
+       rows were being read with the wrong sign or skipped.
+    3. Two identical charges on one day (two coffees) were treated as a
+       duplicate and the second was silently thrown away.
+  Also fixed: descriptions that wrap onto a second line are now joined, and
+  column headers / page footers are ignored.
 
-SCANNED PDFs
-  A PDF that's only a picture of paper has no text to pull out. Attach it to
-  Blue Bonnet as an image instead and it'll read it that way.
+NEW
+  Recurring tab      Default view. Groups charges by merchant (ignoring store
+                     numbers and city), works out the rhythm, and predicts the
+                     next date. "+ Bill" turns any of them into a tracked bill.
+  All transactions   The raw rows, behind a tab, with a clean merchant name on
+                     top and the original description underneath.
+  Charge Tracker     Sends your transactions to Blue Bonnet for a full
+                     line-by-line breakdown: categories with totals and
+                     percentages, what the cryptic merchants actually are,
+                     repeating charges called out, possible duplicates and
+                     forgotten subscriptions, and the few changes that would
+                     actually matter.

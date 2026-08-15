@@ -1017,4 +1017,20 @@ specifics you weren't given.
   }
   setTimeout(maybeRunCheckIn, 20000); // small delay after load, not the first thing that happens
   setInterval(maybeRunCheckIn, 15 * 60 * 1000); // re-checks every 15 min; the hour gate above does the real gating
+
+  /* Small public handle so the rest of the app can hand work to Blue Bonnet —
+     e.g. the Budget tab's "Where's my money going?" button. Kept deliberately
+     tiny: open the panel, and ask a question as if the user typed it. */
+  window.BlueBonnet = {
+    open() {
+      if (!open) bubble.onclick();
+    },
+    ask(text) {
+      this.open();
+      setTimeout(() => sendMessage(text), 150);
+    },
+    isConfigured() {
+      return resolveProxyUrl() !== PROXY_URL_FALLBACK;
+    },
+  };
 })();
