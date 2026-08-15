@@ -1115,7 +1115,12 @@ specifics you weren't given.
 
     try {
       const proxyUrl = resolveProxyUrl();
-      if (proxyUrl === PROXY_URL_FALLBACK) {
+      /* No Anthropic proxy configured? Don't dead-end. If the gateway key is
+         filled in, go straight there — an assistant that talks is far better
+         than an error message, and "works even when Anthropic isn't available"
+         has to include "isn't set up yet", not just "ran out of credit". */
+      const haveAnthropic = proxyUrl !== PROXY_URL_FALLBACK;
+      if (!haveAnthropic && !BB.configured()) {
         throw new Error("Proxy URL not configured yet");
       }
       const liveContext = buildLiveContext();
@@ -1123,11 +1128,13 @@ specifics you weren't given.
 
       let finalText = "";
       let usedBackup = false;
+      let usedBackupReason = "";
       let gatewayInteractionId = null;
       const MAX_ROUNDS = 4;
       for (let round = 0; round < MAX_ROUNDS; round++) {
         let data;
         try {
+          if (!haveAnthropic) throw new Error("no anthropic proxy configured");
           data = await bbCallAnthropic(proxyUrl, Object.assign(
             { max_tokens: 1000, system: systemPrompt, messages: messages },
             checkInMode ? {} : { tools: TOOLS }
@@ -1141,6 +1148,7 @@ specifics you weren't given.
           if (!BB.configured()) throw primaryErr;
 
           loadingRow.querySelector("#bb-loading").textContent = "brain building mode...";
+          usedBackupReason = haveAnthropic ? "failed" : "unconfigured";
           const plain = bbToPlainMessages(systemPrompt +
             "\n\nIMPORTANT: on this provider you cannot perform actions in the app — no adding bills, " +
             "no building budgets, no logging transactions. Answer the question directly and, if something " +
