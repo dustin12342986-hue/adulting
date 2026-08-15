@@ -1,42 +1,31 @@
-ADULTING  v2026.08.15d — AI statement reading
+ADULTING  v2026.08.15e
 
 WHERE FILES GO
   repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
   js folder:  js/app.js, js/state.js, js/blue-bonnet-widget-organize.js
+  cloudflare-worker.js does NOT go in the repo — paste it into Cloudflare.
 
-  cloudflare-worker.js does NOT go in the repo — see below.
+Upload from INSIDE this folder, not the folder itself.
+Hard-refresh, then check the sidebar bottom-left reads v2026.08.15e.
 
-Upload the files from INSIDE this folder, not the folder itself.
-Then hard-refresh; the sidebar bottom-left should read v2026.08.15d.
+WHY IT LOOKED LIKE IT DIED
+  Progress was shown with a toast, and toasts clear themselves after about
+  three seconds. Each part of a statement takes longer than that, so the
+  message vanished mid-request and the import looked like it had stopped.
+  It probably hadn't.
 
-WHY STATEMENTS WERE ONLY HALF-READ
-  Regex can't keep up with bank layouts. A pattern tuned for one bank drops
-  most rows of another — on a real statement it found 7 of 200. Statements are
-  now read by Claude through your Blue Bonnet Worker instead, returning every
-  transaction with a readable merchant name and a category.
+NOW WHILE IT READS
+  A panel stays on screen until the work is actually done, showing:
+    - which part it's on, out of how many
+    - a progress bar and percentage
+    - how many transactions it's found so far
+    - time remaining, based on how long the finished parts actually took
 
-ALSO UPDATE YOUR WORKER  (this one matters for cost)
-  Your Worker had the model hardcoded and ignored what the app asked for, so
-  every call ran on the expensive model. Paste cloudflare-worker.js over your
-  Worker's code and Deploy. Extraction then runs on Haiku, which does this
-  mechanical job just as well for a fraction of the price.
+  If a request fails you get a real explanation with the status code — 401/403
+  means the Worker's API key, 429 means rate-limited, 404 means the Worker
+  Proxy URL in Settings is wrong. Parts that succeed are still imported.
 
-TOKEN USE
-  - Boilerplate, marketing, page headers and balance summaries are stripped
-    before anything is sent. A line with no amount in it can't be a
-    transaction.
-  - Sent in large chunks, so the system prompt is repeated as few times as
-    possible.
-  - max_tokens is sized to the chunk instead of a big round number.
-  - Charge Tracker sends a per-merchant roll-up, not raw lines: 200
-    transactions become ~25 lines. Same information, a fifth of the tokens.
-  Ballpark: a cent or two per statement.
-
-BUDGET -> STATEMENTS
-  Categories   Default. Every charge in a category, biggest first, with totals,
-               % bars and counts. Click one to see the individual charges with
-               real merchant names and the original text underneath.
-  Recurring    What repeats, how often, next expected date.
-  All          Everything.
-  Charge Tracker  Written walkthrough from Blue Bonnet, with duplicates and
-                  forgotten subscriptions flagged.
+HOW TO USE IT
+  Budget -> Statements -> "Upload statement", pick the PDF, wait for the bar.
+  The paperclip in the Blue Bonnet chat is for asking about a receipt or a
+  single charge — the upload button is what fills in your Budget tab.

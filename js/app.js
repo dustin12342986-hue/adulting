@@ -321,7 +321,7 @@ const TABS = [
    required digging through GitHub's API or a CDN that serves stale copies.
    Showing the version in the app itself makes it a one-second glance instead.
    Bump this whenever you ship a change. */
-const APP_VERSION = "2026.08.15d — AI statement reading";
+const APP_VERSION = "2026.08.15e — progress + ETA";
 
 function renderNav() {
   const attn = getAttentionCount();
@@ -1265,6 +1265,56 @@ function chunkLines(text, perChunk) {
   return out;
 }
 
+/* A toast clears itself after ~3 seconds. Each chunk takes longer than that,
+   so progress messages vanished mid-request and the import looked like it had
+   silently died. This stays on screen until the work actually finishes. */
+function showProgress(opts) {
+  /* A spinner with no numbers is indistinguishable from a hang. This shows the
+     part being worked on, a real progress bar, transactions found so far, and
+     a time estimate based on how long the finished parts actually took —
+     measured, not guessed. */
+  const o = typeof opts === "string" ? { label: opts } : (opts || {});
+  let el = document.getElementById("aiProgress");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "aiProgress";
+    el.style.cssText =
+      "position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:95;" +
+      "background:#1e2733;color:#fff;padding:14px 18px;border-radius:12px;font-size:14px;" +
+      "box-shadow:0 6px 22px rgba(20,30,50,0.4);min-width:300px;max-width:calc(100vw - 32px)";
+    document.body.appendChild(el);
+  }
+  const pct = o.total ? Math.round((o.done / o.total) * 100) : 0;
+  el.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:8px">' +
+      "<strong>" + escapeHtml(o.label || "Working…") + "</strong>" +
+      '<span style="font-size:12px;opacity:0.75">' + (o.total ? pct + "%" : "") + "</span>" +
+    "</div>" +
+    '<div style="height:6px;background:rgba(255,255,255,0.2);border-radius:3px;overflow:hidden">' +
+      '<div style="height:6px;width:' + pct + '%;background:#7fd6a8;border-radius:3px;transition:width 0.3s"></div>' +
+    "</div>" +
+    '<div style="display:flex;justify-content:space-between;gap:12px;margin-top:8px;font-size:12px;opacity:0.8">' +
+      "<span>" + (o.total ? "Part " + o.done + " of " + o.total : "") +
+        (o.found != null ? " · " + o.found + " found" : "") + "</span>" +
+      "<span>" + escapeHtml(o.eta || "") + "</span>" +
+    "</div>";
+}
+
+function hideProgress() {
+  const el = document.getElementById("aiProgress");
+  if (el) el.remove();
+}
+
+/* Human-readable time left, from the average of the parts already done. */
+function etaText(msPerPart, partsLeft) {
+  if (!msPerPart || partsLeft <= 0) return "";
+  const secs = Math.round((msPerPart * partsLeft) / 1000);
+  if (secs < 10) return "almost done";
+  if (secs < 60) return "about " + (Math.ceil(secs / 5) * 5) + "s left";
+  const mins = Math.floor(secs / 60), rem = secs % 60;
+  return "about " + mins + "m" + (rem > 20 ? " " + Math.round(rem / 10) * 10 + "s" : "") + " left";
+}
+
 async function extractStatementWithAI(text, label) {
   const proxyUrl = (STATE.settings && STATE.settings.blueBonnetProxyUrl) || "";
   if (!proxyUrl) {
@@ -1274,10 +1324,21 @@ async function extractStatementWithAI(text, label) {
 
   const chunks = chunkLines(text, 120);
   if (!chunks.length) { toast("Nothing to read in that file."); return 0; }
+  showProgress({ label: "Reading your statement", done: 0, total: chunks.length, found: 0, eta: "starting…" });
 
   const all = [];
+  const failures = [];
+  const startedAt = Date.now();
   for (let i = 0; i < chunks.length; i++) {
-    toast("Reading statement… part " + (i + 1) + " of " + chunks.length);
+    const elapsed = Date.now() - startedAt;
+    const msPerPart = i > 0 ? elapsed / i : 0;
+    showProgress({
+      label: "Reading your statement",
+      done: i,
+      total: chunks.length,
+      found: all.length,
+      eta: i > 0 ? etaText(msPerPart, chunks.length - i) : "estimating…",
+    });
     try {
       const res = await fetch(proxyUrl, {
         method: "POST",
@@ -1316,10 +1377,31 @@ async function extractStatementWithAI(text, label) {
       });
     } catch (e) {
       console.warn("AI extract chunk " + (i + 1) + " failed:", e);
+      failures.push("Part " + (i + 1) + ": " + (e.message || e));
     }
   }
 
-  if (!all.length) { toast("Blue Bonnet couldn't read that statement. Try the CSV export."); return 0; }
+  showProgress({ label: "Finishing up", done: chunks.length, total: chunks.length, found: all.length, eta: "done" });
+  await new Promise((r) => setTimeout(r, 400));
+  hideProgress();
+
+  if (!all.length) {
+    /* Don't just say "couldn't read it" — say WHY. A 401/429/500 from the
+       Worker is a completely different problem from a layout it can't parse,
+       and the user can't tell them apart without being told. */
+    openModal(
+      "<h3>Couldn't read that statement</h3>" +
+      '<p class="muted small">Nothing came back from Blue Bonnet. ' +
+      (failures.length
+        ? "The requests failed:</p><div class=\"field\"><textarea rows=\"5\" readonly style=\"width:100%;font-family:monospace;font-size:11px\">" +
+          escapeHtml(failures.join("\n")) + "</textarea></div>" +
+          '<p class="muted small">A 401 or 403 usually means the Worker\'s API key; 429 means rate-limited (wait a minute); ' +
+          "404 means the Worker Proxy URL in Settings is wrong.</p>"
+        : "The requests succeeded but no transactions were found — the PDF may be a scan with no text layer.</p>") +
+      '<div class="modal-actions"><button type="button" data-action="close-modal">Close</button></div>'
+    );
+    return 0;
+  }
 
   // Same count-based de-dupe as the manual path — identical repeat charges are real.
   const counts = new Map();
@@ -1339,7 +1421,12 @@ async function extractStatementWithAI(text, label) {
     id: uid("imp"), label: (label || "Statement") + " (AI)", count: fresh.length, importedAt: Date.now(),
   }]);
   persist();
-  toast("Read " + fresh.length + " transaction(s) from " + (label || "the statement"));
+  toast("Read " + fresh.length + " transaction(s) from " + (label || "the statement") +
+        (failures.length ? " · " + failures.length + " part(s) failed" : ""));
+  if (failures.length) {
+    console.warn("Some parts failed:", failures);
+    setTimeout(() => toast("Note: " + failures.length + " part(s) of the statement failed — some transactions may be missing."), 3500);
+  }
   return fresh.length;
 }
 
