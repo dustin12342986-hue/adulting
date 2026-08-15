@@ -321,7 +321,7 @@ const TABS = [
    required digging through GitHub's API or a CDN that serves stale copies.
    Showing the version in the app itself makes it a one-second glance instead.
    Bump this whenever you ship a change. */
-const APP_VERSION = "2026.08.15b — Charge Tracker";
+const APP_VERSION = "2026.08.15d — AI statement reading";
 
 function renderNav() {
   const attn = getAttentionCount();
@@ -688,7 +688,11 @@ function renderStatementSection() {
     '<div class="card" style="margin-bottom:12px">' +
       '<div class="row" style="flex-wrap:wrap;gap:10px;margin-bottom:10px">' +
         '<label class="btn-primary" style="cursor:pointer">📄 Upload statement<input type="file" accept=".pdf,.csv,.txt,.tsv" id="statementFile" style="display:none" /></label>' +
-        (txns.length ? '<button class="btn-primary" data-action="charge-tracker" style="background:#7c3fd6">🔍 Charge Tracker</button>' : "") +
+        /* Always shown, even with nothing imported. Hiding it made "is the new
+           version live?" impossible to answer at a glance — the button being
+           absent looked identical to the update not landing. It explains
+           itself instead when there's no data yet. */
+        '<button class="btn-primary" data-action="charge-tracker" style="background:#7c3fd6">🔍 Charge Tracker</button>' +
         '<button class="btn-sm" data-action="open-statement-paste">📋 Paste text instead</button>' +
         (txns.length ? '<button class="btn-sm btn-danger" data-action="clear-statement-txns">Clear all transactions</button>' : "") +
       "</div>" +
@@ -698,10 +702,65 @@ function renderStatementSection() {
       : emptyState("🏦", "No statement data yet", "Upload a statement PDF or CSV and the app will pick out what's recurring."));
 }
 
+/* Rocket-Money-style breakdown: every transaction sorted into a category,
+   categories ordered by how much they cost, each one expandable to the
+   individual charges with real merchant names. */
+function renderCategoryBreakdown(txns) {
+  const out = txns.filter((t) => Number(t.amount) < 0);
+  const inflow = txns.filter((t) => Number(t.amount) > 0);
+  if (!out.length) return emptyState("📊", "Nothing to break down yet", "Import a statement first.");
+
+  const groups = new Map();
+  out.forEach((t) => {
+    const c = t.category || "Other";
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c).push(t);
+  });
+
+  const totalOut = out.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const sorted = Array.from(groups.entries())
+    .map(([name, list]) => ({
+      name, list,
+      total: list.reduce((s, t) => s + Math.abs(t.amount), 0),
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const uncategorised = out.filter((t) => !t.category).length;
+
+  return '<div class="grid" style="margin-bottom:14px">' +
+      '<div class="card"><div class="muted small">Money out</div><div style="font-size:22px;font-weight:800">' + fmtMoney(totalOut) + "</div></div>" +
+      '<div class="card"><div class="muted small">Money in</div><div style="font-size:22px;font-weight:800">' + fmtMoney(inflow.reduce((s, t) => s + t.amount, 0)) + "</div></div>" +
+      '<div class="card"><div class="muted small">Transactions</div><div style="font-size:22px;font-weight:800">' + txns.length + "</div></div>" +
+    "</div>" +
+    (uncategorised ? '<div class="muted small" style="margin-bottom:8px">' + uncategorised + " transaction(s) have no category — they were read by the offline parser rather than Blue Bonnet.</div>" : "") +
+    sorted.map((g) => {
+      const pct = totalOut ? Math.round((g.total / totalOut) * 100) : 0;
+      const open = expandedIds.has("cat_" + g.name);
+      return '<div class="card" style="margin-bottom:8px">' +
+        '<div class="row between" style="cursor:pointer" data-action="toggle-category" data-id="' + escapeHtml(g.name) + '">' +
+          "<div><strong>" + escapeHtml(g.name) + '</strong> <span class="muted small">· ' + g.list.length + " charge(s)</span>" +
+            '<div style="height:6px;background:var(--border,#e1e6ee);border-radius:3px;margin-top:6px;width:220px;max-width:50vw">' +
+              '<div style="height:6px;width:' + pct + '%;background:var(--primary-dark,#3a5ba0);border-radius:3px"></div></div>' +
+          "</div>" +
+          '<div style="text-align:right"><strong>' + fmtMoney(g.total) + '</strong><div class="muted small">' + pct + "% · " + (open ? "hide" : "show") + "</div></div>" +
+        "</div>" +
+        (open
+          ? '<table style="margin-top:10px"><tbody>' +
+            g.list.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).map((t) =>
+              '<tr><td class="muted small" style="white-space:nowrap">' + escapeHtml(t.date) + "</td>" +
+              "<td><strong>" + escapeHtml(t.description || "") + "</strong>" +
+              (t.raw && t.raw !== t.description ? '<div class="muted small">' + escapeHtml(t.raw) + "</div>" : "") + "</td>" +
+              '<td style="text-align:right;white-space:nowrap">' + fmtMoney(Math.abs(t.amount)) + "</td></tr>").join("") +
+            "</tbody></table>"
+          : "") +
+      "</div>";
+    }).join("");
+}
+
 /* The point of importing a statement isn't to re-read the statement — it's to
    see what keeps coming out and when the next one lands. So Recurring is the
    default view and the raw rows sit behind a tab for when you need them. */
-let statementView = "recurring"; // recurring | all
+let statementView = "categories"; // categories | recurring | all
 
 function renderStatementTabs(txns, imports, recent, spent, inflow) {
   const recurring = detectRecurring(txns);
@@ -710,9 +769,12 @@ function renderStatementTabs(txns, imports, recent, spent, inflow) {
 
   const tabs =
     '<div class="row" style="gap:6px;margin-bottom:12px">' +
+      '<button class="btn-sm' + (statementView === "categories" ? " btn-primary" : "") + '" data-action="statement-view" data-id="categories">📊 Categories</button>' +
       '<button class="btn-sm' + (statementView === "recurring" ? " btn-primary" : "") + '" data-action="statement-view" data-id="recurring">🔁 Recurring (' + recurring.length + ")</button>" +
       '<button class="btn-sm' + (statementView === "all" ? " btn-primary" : "") + '" data-action="statement-view" data-id="all">All transactions (' + txns.length + ")</button>" +
     "</div>";
+
+  if (statementView === "categories") return tabs + renderCategoryBreakdown(txns);
 
   if (statementView === "all") {
     return tabs +
@@ -930,64 +992,96 @@ function parseStatementText(text) {
     return rows;
   }
 
-  /* Loose statement text — the format real bank PDFs produce.
+  /* Loose statement text.
 
-     Three things here caused real, silent data loss and are handled on purpose:
+     Earlier versions matched with one rigid regex anchored to "date at the
+     very start, amount at the very end". That happens to fit a tidy demo and
+     almost nothing a real bank prints — it matched 7 rows out of 200 on a real
+     statement. Banks put a check number first, or two date columns, or a
+     running balance last, or a reference code after the amount.
 
-     1. RUNNING BALANCE COLUMN. Most statements print
-          08/01  STARBUCKS  -5.75  4,994.25
-        Anchoring the amount to the end of the line captures the BALANCE, so
-        every transaction gets the wrong number. Instead: grab ALL money-looking
-        tokens at the end of the line. Two means amount-then-balance, so take
-        the first and throw the balance away.
+     So instead of one shape, work from the pieces that are always true:
+       - somewhere near the start there is a DATE
+       - somewhere after it there are one or more MONEY tokens
+       - the text in between is the description
+     If a line has both a date and money, it's a transaction. Everything else
+     is furniture.  */
 
-     2. UNSIGNED AMOUNTS UNDER SECTION HEADINGS. Statements often split into
-        "DEPOSITS AND ADDITIONS" and "WITHDRAWALS", printing every amount
-        positive and leaving the sign implied. Track the last heading seen and
-        apply it when a row has no explicit sign.
+  /* A /g regex keeps `lastIndex` between calls, so reusing one across .test(),
+     .match() and .search() makes results alternate between right and wrong.
+     That is exactly what dropped most rows. Build a fresh one each time. */
+  const MONEY_SRC = "\\(?-?\\$?\\d{1,3}(?:,\\d{3})*\\.\\d{2}\\)?|\\(?-?\\$?\\d+\\.\\d{2}\\)?";
+  const money_g = () => new RegExp(MONEY_SRC, "g");
+  const money_1 = () => new RegExp(MONEY_SRC);
+  const MONTHS = "JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC";
+  const DATE_RE = new RegExp(
+    "(\\d{4}-\\d{2}-\\d{2})" +                       // 2026-08-12
+    "|(\\d{1,2}[\\/-]\\d{1,2}(?:[\\/-]\\d{2,4})?)" + // 8/12, 08/12/2026
+    "|((?:" + MONTHS + ")\\.?\\s+\\d{1,2})" +          // AUG 12
+    "|(\\d{1,2}\\s+(?:" + MONTHS + ")\\.?)",           // 12 AUG
+    "i");
 
-     3. WRAPPED DESCRIPTIONS. A continuation line ("WA CARD 1234") has no date
-        and no amount; it belongs to the row above, not to nothing. */
-  const MONEY = "\\(?-?\\$?\\d{1,3}(?:,\\d{3})*(?:\\.\\d{2})\\)?|\\(?-?\\$?\\d+\\.\\d{2}\\)?";
-  const re = new RegExp(
-    "^(\\d{1,2}[\\/-]\\d{1,2}(?:[\\/-]\\d{2,4})?|\\d{4}-\\d{2}-\\d{2})\\s+" + // date
-    "(.*?)\\s+" +                                                              // description
-    "(" + MONEY + ")" +                                                        // amount
-    "(?:\\s+(" + MONEY + "))?\\s*$"                                            // optional balance
-  );
+  let sectionSign = 0;   // +1 deposits, -1 withdrawals, 0 unknown
+  const skipped = [];
 
-  let sectionSign = 0; // +1 deposits, -1 withdrawals, 0 unknown
   for (const line of lines) {
-    // Section headings
-    if (/^[^\d]{4,}$/.test(line)) {
-      if (/deposit|credit|addition|payment received|income/i.test(line)) sectionSign = 1;
-      else if (/withdraw|debit|charge|purchase|payment|fee/i.test(line)) sectionSign = -1;
+    // Section headings set the sign for rows that print amounts unsigned
+    if (!money_1().test(line) && /[A-Za-z]/.test(line)) {
+      if (/deposit|credit|addition|payment received|income|refund/i.test(line)) sectionSign = 1;
+      else if (/withdraw|debit|charge|purchase|payment|fee|transaction/i.test(line)) sectionSign = -1;
     }
-    // Column headers and page furniture
-    if (/^(date|posted)\b.*\b(description|amount|balance)\b/i.test(line)) continue;
-    if (/^page \d+/i.test(line)) continue;
 
-    const m = line.match(re);
-    if (!m) {
-      // Continuation of the previous description (no date, no amount, short)
-      if (rows.length && !/\d{1,2}[\/-]\d{1,2}/.test(line) && line.length < 60 && !new RegExp(MONEY).test(line)) {
+    // Column headers / page furniture
+    if (/^(date|posted|trans)\b.*(description|amount|balance)/i.test(line)) continue;
+    if (/^page \d+|^statement period|^account (number|summary)|^beginning balance|^ending balance|^total (deposits|withdrawals)/i.test(line)) continue;
+
+    const money = line.match(money_g()) || [];
+    const dm = line.match(DATE_RE);
+
+    if (!dm || !money.length) {
+      // A line with no date and no money, sitting under a real row, is a
+      // wrapped description — attach it rather than dropping it.
+      if (rows.length && !dm && !money.length && line.length < 60) {
         const prev = rows[rows.length - 1];
         prev.description = maskSensitive((prev.description + " " + line).trim());
+      } else if (line.length > 8) {
+        skipped.push(line);
       }
       continue;
     }
-    const date = normalizeDate(m[1]);
-    if (!date) continue;
 
-    const raw = m[3];
-    let amount = parseMoney(raw);
-    if (isNaN(amount)) continue;
-    if (/\(.*\)/.test(raw)) amount = -Math.abs(amount);          // (12.34) = money out
-    else if (!/^-|^\(|-\$/.test(raw.trim()) && sectionSign) {     // no sign of its own
-      amount = sectionSign * Math.abs(amount);
-    }
-    rows.push({ id: uid(), date, description: maskSensitive(m[2]), amount });
+    const date = normalizeDate(dm[0]);
+    if (!date) { skipped.push(line); continue; }
+
+    /* Which money token is the amount?
+       One token  -> that's it.
+       Two or more -> the LAST is almost always the running balance, so take
+       the one before it. Statements that print amount-then-balance are the
+       common case; a lone trailing balance never appears without an amount. */
+    const rawAmt = money.length >= 2 ? money[money.length - 2] : money[0];
+
+    let amount = parseMoney(rawAmt);
+    if (isNaN(amount)) { skipped.push(line); continue; }
+    if (/\(.*\)/.test(rawAmt)) amount = -Math.abs(amount);
+    else if (!/-/.test(rawAmt) && sectionSign) amount = sectionSign * Math.abs(amount);
+
+    // Description = between the date and the first money token
+    const afterDate = line.slice((dm.index || 0) + dm[0].length);
+    const firstMoneyAt = afterDate.search(money_1());
+    let desc = (firstMoneyAt > 0 ? afterDate.slice(0, firstMoneyAt) : afterDate)
+      .replace(/^[\s\-–|]+/, "")
+      // a second date column (posted + transaction date) isn't part of the name
+      .replace(new RegExp("^(" + DATE_RE.source + ")\\s*", "i"), "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!desc) desc = "(no description)";
+
+    rows.push({ id: uid(), date, description: maskSensitive(desc), amount });
   }
+
+  // Handed to the caller so the import can report what it couldn't read,
+  // instead of silently dropping most of a statement like it used to.
+  rows.skippedLines = skipped;
   return rows;
 }
 
@@ -1082,6 +1176,12 @@ async function importStatementPdf(file) {
       toast("That PDF has no readable text — it's probably a scan. Try your bank's CSV export instead.");
       return;
     }
+    // Prefer the AI reader when it's available — it handles layouts the regex
+    // can't, which on a real statement is most of them.
+    if ((STATE.settings && STATE.settings.blueBonnetProxyUrl)) {
+      await extractStatementWithAI(text, file.name);
+      return;
+    }
     const added = importStatementText(text, file.name);
     if (!added) {
       // Text came out but nothing matched the transaction patterns. Rather than
@@ -1093,6 +1193,165 @@ async function importStatementPdf(file) {
     console.error(e);
     toast("Couldn't read that PDF (" + e.message + "). Try the CSV export, or copy the text and paste it.");
   }
+}
+
+/* ===========================================================================
+   AI statement extraction  (the Rocket-Money-style path)
+
+   Regex parsing of bank statements is a losing battle — every bank prints a
+   different layout, and a pattern tuned for one drops most rows of another.
+   On a real statement the regex found 7 transactions out of 200.
+
+   So the regex is now only a fast local preview. The real engine is Claude:
+   the statement text goes to Blue Bonnet's Worker in chunks and comes back as
+   structured JSON — every transaction, with a human-readable merchant name and
+   a category. That is the same job an LLM is genuinely good at and a regex
+   never will be.
+
+   Costs a fraction of a cent per statement and the file still never leaves the
+   browser except through the user's own Worker.
+   =========================================================================== */
+
+const STATEMENT_CATEGORIES = [
+  "Housing", "Utilities", "Groceries", "Eating out", "Transport", "Fuel",
+  "Insurance", "Health", "Subscriptions", "Shopping", "Debt & BNPL",
+  "Fees & interest", "Transfers", "Income", "Business", "Other",
+];
+
+const AI_EXTRACT_SYSTEM =
+  "You extract transactions from bank statements. You return ONLY valid JSON — no prose, " +
+  "no markdown fences, nothing else.\n\n" +
+  "Return: {\"transactions\":[{\"date\":\"YYYY-MM-DD\",\"name\":\"...\",\"raw\":\"...\"," +
+  "\"amount\":-12.34,\"category\":\"...\"}]}\n\n" +
+  "Rules:\n" +
+  "- EVERY transaction line. Do not summarise, sample, or skip repeats. If the same merchant " +
+  "appears 12 times, return 12 entries.\n" +
+  "- amount is NEGATIVE for money out, POSITIVE for money in.\n" +
+  "- Statements often show a running BALANCE after the amount. The balance is NOT the amount. " +
+  "If two numbers trail a row, the first is the amount.\n" +
+  "- Sections like 'DEPOSITS' or 'WITHDRAWALS' set the sign when a row's amount is unsigned.\n" +
+  "- name = the readable merchant: 'STARBUCKS STORE 00123 DALLAS TX' becomes 'Starbucks'. " +
+  "'SQ *JOES TACOS' becomes 'Joe's Tacos'. Keep it short and recognisable.\n" +
+  "- raw = the original description text, unchanged.\n" +
+  "- category = exactly one of: " + STATEMENT_CATEGORIES.join(", ") + "\n" +
+  "- Skip page headers, column headers, balance summaries and totals — they are not transactions.\n" +
+  "- If a year isn't printed on a row, infer it from the statement period.";
+
+/* Statements are long. Send them in chunks so no single request gets truncated
+   mid-JSON, and so progress is visible on a 200-row month. */
+function chunkLines(text, perChunk) {
+  /* Token discipline. Every line sent costs money, and most of a statement is
+     furniture: marketing text, addresses, legal boilerplate, page headers,
+     balance summaries. Dropping those before the request typically cuts the
+     upload by a third to a half with no loss of transactions — a line with no
+     digits in it cannot be one. */
+  const MONEY = /\d+\.\d{2}/;
+  const JUNK = /^(page \d|statement period|account (number|summary)|member fdic|equal housing|customer service|questions\?|www\.|p\.?o\.? box|continued on|thank you|important information|to report|visit us|call \d|see reverse|this statement|deposits are insured)/i;
+
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .filter((l) => {
+      if (!l || l.length < 6) return false;
+      if (JUNK.test(l)) return false;
+      // Keep section headings (they set the sign) and anything with an amount.
+      if (MONEY.test(l)) return true;
+      if (/^[A-Z][A-Z \/&-]{5,}$/.test(l)) return true; // ALL-CAPS heading
+      return false;
+    });
+
+  const out = [];
+  for (let i = 0; i < lines.length; i += perChunk) out.push(lines.slice(i, i + perChunk).join("\n"));
+  return out;
+}
+
+async function extractStatementWithAI(text, label) {
+  const proxyUrl = (STATE.settings && STATE.settings.blueBonnetProxyUrl) || "";
+  if (!proxyUrl) {
+    toast("Set your Worker Proxy URL in Settings → Blue Bonnet to use AI reading.");
+    return 0;
+  }
+
+  const chunks = chunkLines(text, 120);
+  if (!chunks.length) { toast("Nothing to read in that file."); return 0; }
+
+  const all = [];
+  for (let i = 0; i < chunks.length; i++) {
+    toast("Reading statement… part " + (i + 1) + " of " + chunks.length);
+    try {
+      const res = await fetch(proxyUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          /* Extraction is mechanical, not clever — Haiku does it as well as a
+             bigger model at a fraction of the price. max_tokens is sized to the
+             chunk (roughly 45 tokens of JSON per transaction) rather than left
+             at a big round number, so a runaway response can't quietly cost a
+             fortune. */
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: Math.min(8000, 400 + chunks[i].split("\n").length * 60),
+          system: AI_EXTRACT_SYSTEM,
+          messages: [{
+            role: "user",
+            content: "Statement text (part " + (i + 1) + " of " + chunks.length + "):\n\n" + chunks[i],
+          }],
+        }),
+      });
+      if (!res.ok) throw new Error("proxy " + res.status);
+      const data = await res.json();
+      const textOut = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+      const parsed = safeParseJson(textOut);
+      (parsed && parsed.transactions ? parsed.transactions : []).forEach((t) => {
+        const date = normalizeDate(t.date) || t.date;
+        const amount = Number(t.amount);
+        if (!date || isNaN(amount)) return;
+        all.push({
+          id: uid("txn"),
+          date,
+          description: maskSensitive(t.name || t.raw || ""),
+          raw: maskSensitive(t.raw || ""),
+          amount,
+          category: STATEMENT_CATEGORIES.includes(t.category) ? t.category : "Other",
+        });
+      });
+    } catch (e) {
+      console.warn("AI extract chunk " + (i + 1) + " failed:", e);
+    }
+  }
+
+  if (!all.length) { toast("Blue Bonnet couldn't read that statement. Try the CSV export."); return 0; }
+
+  // Same count-based de-dupe as the manual path — identical repeat charges are real.
+  const counts = new Map();
+  (STATE.statementTxns || []).forEach((t) => {
+    const k = t.date + "|" + t.description + "|" + t.amount;
+    counts.set(k, (counts.get(k) || 0) + 1);
+  });
+  const fresh = all.filter((r) => {
+    const k = r.date + "|" + r.description + "|" + r.amount;
+    const n = counts.get(k) || 0;
+    if (n > 0) { counts.set(k, n - 1); return false; }
+    return true;
+  });
+
+  STATE.statementTxns = (STATE.statementTxns || []).concat(fresh);
+  STATE.statementImports = (STATE.statementImports || []).concat([{
+    id: uid("imp"), label: (label || "Statement") + " (AI)", count: fresh.length, importedAt: Date.now(),
+  }]);
+  persist();
+  toast("Read " + fresh.length + " transaction(s) from " + (label || "the statement"));
+  return fresh.length;
+}
+
+/* Models sometimes wrap JSON in prose or fences despite instructions. */
+function safeParseJson(s) {
+  if (!s) return null;
+  try { return JSON.parse(s); } catch (e) { /* keep trying */ }
+  const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) { try { return JSON.parse(fenced[1]); } catch (e) { /* keep trying */ } }
+  const first = s.indexOf("{"), last = s.lastIndexOf("}");
+  if (first >= 0 && last > first) { try { return JSON.parse(s.slice(first, last + 1)); } catch (e) { /* give up */ } }
+  return null;
 }
 
 function importStatementText(text, label) {
@@ -1124,8 +1383,39 @@ function importStatementText(text, label) {
   }]);
   persist();
   const dupes = rows.length - fresh.length;
-  toast("Imported " + fresh.length + " transaction(s)" + (dupes ? " · skipped " + dupes + " already there" : ""));
+  const unread = (rows.skippedLines || []).length;
+  toast("Imported " + fresh.length + " transaction(s)" +
+        (dupes ? " · " + dupes + " already there" : "") +
+        (unread ? " · " + unread + " line(s) not recognised" : ""));
+
+  /* If a lot of the statement couldn't be read, say so and show the lines.
+     Silently importing 7 rows out of 200 looks like the statement only had 7
+     rows — the failure is invisible, which is the worst kind. */
+  if (unread > fresh.length) {
+    setTimeout(() => openImportReport(fresh.length, rows.skippedLines), 400);
+  }
   return fresh.length;
+}
+
+/* Shows what the parser couldn't read, so a bad match rate is visible and
+   fixable instead of silent. The lines can be handed straight to Blue Bonnet,
+   which can usually read a layout the regex can't. */
+function openImportReport(imported, skippedLines) {
+  const sample = (skippedLines || []).slice(0, 60).join("\n");
+  openModal(
+    "<h3>Some of that statement didn't read cleanly</h3>" +
+    '<p class="muted small">Imported <strong>' + imported + "</strong> transaction(s), but <strong>" +
+      (skippedLines || []).length + "</strong> line(s) didn't match a pattern the app recognises. " +
+      "Bank layouts vary a lot. Blue Bonnet can usually read them anyway.</p>" +
+    '<div class="field"><label>Lines that were skipped</label>' +
+      '<textarea rows="10" readonly style="width:100%;font-family:monospace;font-size:11px">' +
+      escapeHtml(sample) + "</textarea></div>" +
+    '<div class="modal-actions">' +
+      '<button type="button" data-action="close-modal">Close</button>' +
+      '<button type="button" class="btn-primary" data-action="skipped-to-bluebonnet">Ask Blue Bonnet to read these</button>' +
+    "</div>"
+  );
+  window.__lastSkippedLines = skippedLines || [];
 }
 
 /* Charge Tracker
@@ -1139,34 +1429,55 @@ function importStatementText(text, label) {
    user's own Worker, so nothing goes anywhere new. */
 function runChargeTracker() {
   const txns = STATE.statementTxns || [];
-  if (!txns.length) { toast("Import a statement first."); return; }
+  if (!txns.length) {
+    toast("Nothing imported yet — upload a statement PDF or CSV first, then Charge Tracker will break it down.");
+    return;
+  }
   if (!window.BlueBonnet) { toast("Blue Bonnet isn't loaded on this page."); return; }
   if (!window.BlueBonnet.isConfigured || !window.BlueBonnet.isConfigured()) {
     toast("Set your Worker Proxy URL in Settings → Blue Bonnet first.");
     return;
   }
 
-  // Newest first, capped — a year of transactions would blow the context and
-  // cost real money for no extra insight.
-  const list = txns.slice().sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 300);
-  const spent = list.filter((t) => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-  const inflow = list.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-  const span = list.length ? (list[list.length - 1].date + " to " + list[0].date) : "";
+  /* Token discipline: the earlier version pasted up to 300 raw lines into the
+     prompt. Once transactions are categorised, a per-merchant roll-up carries
+     the same information in a fraction of the tokens — 200 transactions become
+     ~40 merchant lines. The model gets better structure AND costs less. */
+  const out = txns.filter((t) => Number(t.amount) < 0);
+  const inflow = txns.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + t.amount, 0);
+  const spent = out.reduce((s, t) => s + Math.abs(t.amount), 0);
+  const dates = txns.map((t) => t.date).sort();
+  const span = dates.length ? dates[0] + " to " + dates[dates.length - 1] : "";
 
-  const lines = list.map((t) => t.date + "  " + t.description + "  " + Number(t.amount).toFixed(2));
+  // merchant -> { count, total, category }
+  const roll = new Map();
+  out.forEach((t) => {
+    const key = (t.description || "?") + "|" + (t.category || "Other");
+    const cur = roll.get(key) || { count: 0, total: 0 };
+    cur.count++; cur.total += Math.abs(t.amount);
+    roll.set(key, cur);
+  });
+  const lines = Array.from(roll.entries())
+    .map(([key, v]) => {
+      const [name, cat] = key.split("|");
+      return { name, cat, count: v.count, total: v.total };
+    })
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 120)
+    .map((r) => r.name + " [" + r.cat + "] x" + r.count + " = " + r.total.toFixed(2));
 
   const prompt =
-    "Walk me through where my money is going. Here are my transactions (" +
-    list.length + " of them, " + span + "). Negative = money out.\n\n" +
+    "Here's my spending, " + span + ". " + out.length + " charges, " +
+    fmtMoney(spent) + " out, " + fmtMoney(inflow) + " in.\n" +
+    "Grouped by merchant as: NAME [category] xCOUNT = TOTAL\n\n" +
     lines.join("\n") +
-    "\n\nTotal out: " + fmtMoney(spent) + ". Total in: " + fmtMoney(inflow) + ".\n\n" +
-    "Please:\n" +
-    "1. Sort everything into plain-English categories (housing, transport, food/groceries, eating out, subscriptions, debt/BNPL, one-offs, etc). Give the total and the % of spending for each, biggest first.\n" +
-    "2. Inside each category, name the specific merchants and what they actually are, so I know what the cryptic ones were.\n" +
-    "3. Call out anything that repeats — subscriptions and small recurring charges especially. Small-and-frequent is the stuff I can't see on my own.\n" +
-    "4. Flag anything that looks like a duplicate charge, a fee, or something I might have forgotten I'm paying for.\n" +
-    "5. Finish with the two or three things that would actually make a difference, in order of impact. Be concrete about amounts.\n\n" +
-    "Keep it readable — I'm trying to learn how to handle a lot of transactions, not just be handed a number. Don't lecture me about spending; just show me clearly what's there.";
+    "\n\nWalk me through it:\n" +
+    "1. Totals and % by category, biggest first.\n" +
+    "2. What the cryptic merchant names actually are.\n" +
+    "3. Anything repeating — subscriptions and small frequent charges especially, since those are the ones I can't see.\n" +
+    "4. Possible duplicate charges, fees, or things I've likely forgotten I'm paying for.\n" +
+    "5. The two or three changes that would actually matter, with amounts.\n\n" +
+    "Readable, not a lecture — I'm learning to handle a lot of transactions.";
 
   window.BlueBonnet.ask(prompt);
 }
@@ -2223,7 +2534,27 @@ function handleAction(el, e) {
       break;
     case "open-statement-paste": openStatementPasteModal(); break;
     case "statement-view": statementView = id; render(); break;
+    case "toggle-category": {
+      const key = "cat_" + id;
+      if (expandedIds.has(key)) expandedIds.delete(key); else expandedIds.add(key);
+      render();
+      break;
+    }
     case "charge-tracker": runChargeTracker(); break;
+    case "skipped-to-bluebonnet": {
+      const lines = window.__lastSkippedLines || [];
+      closeModal();
+      if (!window.BlueBonnet || !window.BlueBonnet.isConfigured || !window.BlueBonnet.isConfigured()) {
+        toast("Set your Worker Proxy URL in Settings → Blue Bonnet first.");
+        break;
+      }
+      window.BlueBonnet.ask(
+        "These lines are from my bank statement but the app couldn't parse them. " +
+        "Read them and log every transaction you can identify with log_transactions " +
+        "(negative for money out). Skip anything that isn't a transaction.\n\n" +
+        lines.slice(0, 200).join("\n"));
+      break;
+    }
     case "recurring-to-bill": recurringToBill(decodeURIComponent(id)); break;
     case "clear-statement-txns":
       if (confirm("Clear all imported transactions? Your bills and payment plans aren't affected.")) {
@@ -2326,7 +2657,8 @@ function handleSubmit(form, e) {
     case "statement-paste": {
       const text = collectFormData(form).text || "";
       closeModal();
-      importStatementText(text, "Pasted " + fmtDate(todayISO()));
+      if (STATE.settings && STATE.settings.blueBonnetProxyUrl) extractStatementWithAI(text, "Pasted " + fmtDate(todayISO()));
+      else importStatementText(text, "Pasted " + fmtDate(todayISO()));
       break;
     }
   }
@@ -2384,7 +2716,10 @@ function wireEvents() {
         importStatementPdf(file);
       } else {
         const reader = new FileReader();
-        reader.onload = () => { importStatementText(reader.result, file.name); };
+        reader.onload = () => {
+          if (STATE.settings && STATE.settings.blueBonnetProxyUrl) extractStatementWithAI(reader.result, file.name);
+          else importStatementText(reader.result, file.name);
+        };
         reader.onerror = () => toast("Couldn't read that file.");
         reader.readAsText(file);
       }

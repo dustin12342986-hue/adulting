@@ -1,30 +1,42 @@
-ADULTING — upload set (v2026.08.15b, Charge Tracker)
+ADULTING  v2026.08.15d — AI statement reading
 
-The files in this zip are already in the right layout. Unzip it, then upload
-each file to the SAME place in your repo:
+WHERE FILES GO
+  repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
+  js folder:  js/app.js, js/state.js, js/blue-bonnet-widget-organize.js
 
-  ROOT of the repo (next to the existing index.html)
-    index.html
-    manifest.json
-    sw.js            <-- currently missing from your repo; this is the 404
-    icon-192.png
-    icon-512.png
+  cloudflare-worker.js does NOT go in the repo — see below.
 
-  Inside the existing "js" folder
-    js/app.js
-    js/state.js
-    js/blue-bonnet-widget-organize.js
+Upload the files from INSIDE this folder, not the folder itself.
+Then hard-refresh; the sidebar bottom-left should read v2026.08.15d.
 
-IMPORTANT — do not upload the unzipped FOLDER itself. GitHub keeps the folder
-name, so the files end up one level too deep and the site keeps running old
-code. Open the folder and upload the files from inside it.
+WHY STATEMENTS WERE ONLY HALF-READ
+  Regex can't keep up with bank layouts. A pattern tuned for one bank drops
+  most rows of another — on a real statement it found 7 of 200. Statements are
+  now read by Claude through your Blue Bonnet Worker instead, returning every
+  transaction with a readable merchant name and a category.
 
-HOW TO CONFIRM IT WORKED
-  Hard-refresh the app (Cmd+Shift+R) and look at the bottom of the left
-  sidebar, under "Board view". It should read:
+ALSO UPDATE YOUR WORKER  (this one matters for cost)
+  Your Worker had the model hardcoded and ignored what the app asked for, so
+  every call ran on the expensive model. Paste cloudflare-worker.js over your
+  Worker's code and Deploy. Extraction then runs on Haiku, which does this
+  mechanical job just as well for a fraction of the price.
 
-      v2026.08.15b — Charge Tracker
+TOKEN USE
+  - Boilerplate, marketing, page headers and balance summaries are stripped
+    before anything is sent. A line with no amount in it can't be a
+    transaction.
+  - Sent in large chunks, so the system prompt is repeated as few times as
+    possible.
+  - max_tokens is sized to the chunk instead of a big round number.
+  - Charge Tracker sends a per-merchant roll-up, not raw lines: 200
+    transactions become ~25 lines. Same information, a fifth of the tokens.
+  Ballpark: a cent or two per statement.
 
-  If it says that, the new code is live and the purple "Charge Tracker" button
-  will be in Budget -> Statements (it appears once you've imported a statement).
-  If the version line is missing or different, the upload didn't land.
+BUDGET -> STATEMENTS
+  Categories   Default. Every charge in a category, biggest first, with totals,
+               % bars and counts. Click one to see the individual charges with
+               real merchant names and the original text underneath.
+  Recurring    What repeats, how often, next expected date.
+  All          Everything.
+  Charge Tracker  Written walkthrough from Blue Bonnet, with duplicates and
+                  forgotten subscriptions flagged.

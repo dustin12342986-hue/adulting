@@ -50,8 +50,26 @@ export default {
     // Build the request to Anthropic. `tools` and `tool_choice` are forwarded
     // through only when the app actually sent them (never sent during Blue
     // Bonnet's proactive check-ins, so those calls stay tool-free on purpose).
+    /* Model is chosen by the app now, not hardcoded here.
+
+       Statement extraction is mechanical work that a small model does just as
+       well as a large one, for a fraction of the cost — but only if this Worker
+       actually honours what the app asks for. It used to ignore incoming.model
+       entirely, so every call ran on the expensive model no matter what.
+
+       Allowlisted rather than passed straight through, so a bad request can't
+       point this Worker (and your API key) at something unexpected. */
+    const ALLOWED_MODELS = [
+      "claude-haiku-4-5-20251001",
+      "claude-sonnet-4-5-20250929",
+      "claude-sonnet-5",
+      "claude-opus-5",
+    ];
+    const requested = typeof incoming.model === "string" ? incoming.model : "";
+    const model = ALLOWED_MODELS.includes(requested) ? requested : "claude-sonnet-4-5-20250929";
+
     const anthropicBody = {
-      model: "claude-sonnet-4-5-20250929",
+      model,
       max_tokens: incoming.max_tokens || 1000,
       system: incoming.system || "",
       messages: incoming.messages || [],
