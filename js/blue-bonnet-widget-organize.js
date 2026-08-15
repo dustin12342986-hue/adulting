@@ -1196,7 +1196,12 @@ specifics you weren't given.
 
       loadingRow.remove();
       if (finalText) {
-        renderMessage("assistant", finalText);
+        renderMessage("assistant",
+          (usedBackup
+            ? "🧠 Brain building mode — running on your own gateway, which is what trains it over time. I can talk things through, but I can't change anything in the app from here." +
+              (usedBackupReason === "unconfigured" ? " (Add a Worker Proxy URL in Settings to restore that.)" : "") + "\n\n"
+            : "") + finalText,
+          gatewayInteractionId);
       }
       if (checkInMode && !open && finalText) { hasUnread = true; bubble.classList.add("bb-unread"); }
       if (checkInMode && finalText && window.showNotification) window.showNotification("Blue Bonnet check-in", finalText);
@@ -1205,7 +1210,29 @@ specifics you weren't given.
       if (checkInMode) {
         console.warn("Blue Bonnet check-in skipped:", e);
       } else {
-        renderMessage("assistant", "Couldn't reach the assistant. Set your Worker Proxy URL in Settings \u2192 Blue Bonnet Assistant (or edit PROXY_URL_FALLBACK in blue-bonnet-widget-organize.js).");
+        /* This used to say "set your Worker Proxy URL" for EVERY failure,
+           including ones where the URL was perfectly fine. That sent us
+           chasing a configuration problem that didn't exist while the real
+           cause — an API error from the Worker — stayed hidden. Say what
+           actually happened instead. */
+        const msg = String((e && e.message) || e);
+        let human;
+        if (/no assistant endpoint/i.test(msg)) {
+          human = "No assistant endpoint is configured. Add a Worker Proxy URL in Settings → Blue Bonnet Assistant.";
+        } else if (/\b401\b|\b403\b|invalid.*api.*key|authentication/i.test(msg)) {
+          human = "The Worker answered, but Anthropic rejected the API key. Check ANTHROPIC_API_KEY in your Cloudflare Worker's settings.";
+        } else if (/\b402\b|credit|billing|quota|insufficient/i.test(msg)) {
+          human = "Out of Anthropic credit. Top up, or fill in the gateway KEY in blue-bonnet-widget-organize.js so it can fall back to your free providers.";
+        } else if (/\b429\b|rate.?limit/i.test(msg)) {
+          human = "Rate limited — too many requests just now. Wait a minute and try again.";
+        } else if (/\b5\d\d\b/.test(msg)) {
+          human = "The Worker returned a server error. Check its logs in the Cloudflare dashboard.";
+        } else if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+          human = "Couldn't reach the Worker at all — network issue, or the Worker URL is wrong or not deployed.";
+        } else {
+          human = "The assistant call failed.";
+        }
+        renderMessage("assistant", human + "\n\nDetails: " + msg.slice(0, 300));
         console.error("Blue Bonnet error:", e);
       }
     } finally {
