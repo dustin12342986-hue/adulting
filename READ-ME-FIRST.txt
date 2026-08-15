@@ -1,0 +1,30 @@
+ADULTING — upload set (v2026.08.15b, Charge Tracker)
+
+The files in this zip are already in the right layout. Unzip it, then upload
+each file to the SAME place in your repo:
+
+  ROOT of the repo (next to the existing index.html)
+    index.html
+    manifest.json
+    sw.js            <-- currently missing from your repo; this is the 404
+    icon-192.png
+    icon-512.png
+
+  Inside the existing "js" folder
+    js/app.js
+    js/state.js
+    js/blue-bonnet-widget-organize.js
+
+IMPORTANT — do not upload the unzipped FOLDER itself. GitHub keeps the folder
+name, so the files end up one level too deep and the site keeps running old
+code. Open the folder and upload the files from inside it.
+
+HOW TO CONFIRM IT WORKED
+  Hard-refresh the app (Cmd+Shift+R) and look at the bottom of the left
+  sidebar, under "Board view". It should read:
+
+      v2026.08.15b — Charge Tracker
+
+  If it says that, the new code is live and the purple "Charge Tracker" button
+  will be in Budget -> Statements (it appears once you've imported a statement).
+  If the version line is missing or different, the upload didn't land.

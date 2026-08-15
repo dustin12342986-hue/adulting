@@ -315,6 +315,14 @@ const TABS = [
   { id: "settings", label: "Settings", icon: "⚙️" },
 ];
 
+/* Visible build stamp.
+
+   "Did the upload actually take?" came up over and over, and every answer
+   required digging through GitHub's API or a CDN that serves stale copies.
+   Showing the version in the app itself makes it a one-second glance instead.
+   Bump this whenever you ship a change. */
+const APP_VERSION = "2026.08.15b — Charge Tracker";
+
 function renderNav() {
   const attn = getAttentionCount();
   $("#sidebar").innerHTML =
@@ -330,7 +338,8 @@ function renderNav() {
     // instead of depending on the browser's pop-up permission (which the
     // Dashboard's "Open full-screen board view" button below still uses,
     // for people who deliberately want it on a second screen/tablet).
-    '<div style="margin-top:auto;padding-top:10px"><button class="nav-item" data-action="enter-board-mode">' + icon("board", 17) + " Board view</button></div>";
+    '<div style="margin-top:auto;padding-top:10px"><button class="nav-item" data-action="enter-board-mode">' + icon("board", 17) + " Board view</button>" +
+      '<div class="muted" style="font-size:10px;opacity:0.55;padding:8px 10px 2px;line-height:1.3" title="App version — if this doesn\'t match what you just uploaded, the browser is still running an old copy">v' + APP_VERSION + "</div></div>";
 }
 
 function getAttentionCount() {
