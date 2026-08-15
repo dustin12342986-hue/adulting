@@ -321,7 +321,7 @@ const TABS = [
    required digging through GitHub's API or a CDN that serves stale copies.
    Showing the version in the app itself makes it a one-second glance instead.
    Bump this whenever you ship a change. */
-const APP_VERSION = "2026.08.16c — gateway fallback fix";
+const APP_VERSION = "2026.08.16d — settings autosave";
 
 function renderNav() {
   const attn = getAttentionCount();
@@ -2521,7 +2521,8 @@ function renderSettings() {
 
     '<div class="card" style="max-width:560px;margin-bottom:20px"><h2>Blue Bonnet Assistant</h2>' +
     '<p class="small muted">The chat bubble in the corner is Blue Bonnet — an organizing assistant scoped to this app, with real advice for ADHD/autism-friendly systems. It runs through your own Cloudflare Worker proxy (so your Anthropic API key never sits in this file). It automatically hides while Board view is open.</p>' +
-    '<form data-form="settings-bluebonnet"><div class="field"><label>Worker Proxy URL</label><input type="text" name="blueBonnetProxyUrl" value="' + escapeHtml(STATE.settings.blueBonnetProxyUrl || "") + '" placeholder="https://your-worker.your-subdomain.workers.dev" /></div>' +
+    '<form data-form="settings-bluebonnet"><div class="field"><label>Worker Proxy URL</label><input type="text" name="blueBonnetProxyUrl" id="bbProxyField" value="' + escapeHtml(STATE.settings.blueBonnetProxyUrl || "") + '" placeholder="https://your-worker.your-subdomain.workers.dev" />' +
+      '<div class="hint muted small">Saves as soon as you click away — no need to find the right Save button.</div></div>' +
     '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="blueBonnetPraise" ' + (STATE.settings.blueBonnetPraise !== false ? "checked" : "") + ' style="width:18px;height:18px" /> Show little encouragement bubbles when you finish something</label>' +
     '<label class="row small" style="margin-bottom:10px"><input type="checkbox" name="blueBonnetCheckins" ' + (STATE.settings.blueBonnetCheckins !== false ? "checked" : "") + ' style="width:18px;height:18px" /> Let Blue Bonnet check in on its own every few hours (only while connected; never forces the chat open, just leaves a quiet badge)</label>' +
     '<div class="field" style="max-width:180px"><label>Check in every (hours)</label><input type="number" min="1" max="24" name="blueBonnetCheckinHours" value="' + (STATE.settings.blueBonnetCheckinHours || 3) + '" /></div>' +
@@ -3006,6 +3007,22 @@ function wireEvents() {
     const actionEl = e.target.closest("[data-action]");
     if (actionEl) handleAction(actionEl, e);
   });
+  /* The Worker Proxy URL is the single most important field in Settings, and
+     the "paste into one form, click a different form's Save" trap has cost
+     real time more than once. So it commits the moment focus leaves it —
+     no button hunting, and a paste can't be silently thrown away. */
+  document.body.addEventListener("blur", (e) => {
+    if (!e.target || e.target.id !== "bbProxyField") return;
+    const v = String(e.target.value || "").trim();
+    // Tolerate pasting a whole sentence around the URL
+    const m = v.match(/https?:\/\/[^\s"']+/);
+    const url = m ? m[0].replace(/[.,)]$/, "") : v;
+    if (url === (STATE.settings.blueBonnetProxyUrl || "")) return;
+    STATE.settings.blueBonnetProxyUrl = url;
+    persist();
+    toast(url ? "Worker URL saved" : "Worker URL cleared");
+  }, true);
+
   document.body.addEventListener("change", (e) => {
     const actionEl = e.target.closest("[data-action]");
     if (actionEl) handleChange(actionEl);

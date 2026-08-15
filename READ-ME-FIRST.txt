@@ -1,27 +1,25 @@
-ADULTING  v2026.08.16c — gateway fallback fix
+ADULTING  v2026.08.16d — settings autosave
 
-TWO THINGS TO DO
-  1. Upload these files (from INSIDE this folder, not the folder itself)
-       repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
-       js folder:  app.js, state.js, budget-engine.js, reentry.js,
-                   blue-bonnet-widget-organize.js
+DO THIS FIRST (no upload needed, fixes it right now)
+  Settings -> scroll to the "Blue Bonnet Assistant" CARD
+  Paste into Worker Proxy URL:
+      https://bluebonnetproxy.dustin12342986.workers.dev
+  Click the Save button INSIDE THAT CARD — not the one higher up the page.
+  You should see a "Saved" toast.
 
-  2. Put your Worker Proxy URL back in the app:
-       Settings -> Blue Bonnet Assistant -> Worker Proxy URL
-       https://bluebonnetproxy.dustin12342986.workers.dev
-     It was lost when site data got cleared. This is what gives Blue Bonnet
-     its powers back (budgets, bills, statements).
+WHY IT KEPT NOT STICKING
+  The Settings page has three separate forms, each with its own Save button.
+  Pasting into the Blue Bonnet field and then clicking the General or Calendar
+  Save button silently discards it — the paste looks like it worked and isn't
+  stored anywhere.
 
-  Optional: line 43 of js/blue-bonnet-widget-organize.js still has
-  PUT_YOUR_GATEWAY_KEY_HERE. Fill it in to enable the free-provider backup.
+FIXED IN THIS BUILD
+  The Worker Proxy URL now saves the moment you click away from the field.
+  No Save button needed, no way to lose it by pressing the wrong one. It also
+  pulls the URL out if you paste a whole sentence around it.
 
-WHAT WAS WRONG
-  "Couldn't reach the assistant" appeared because no Worker Proxy URL was
-  saved. But it should never have dead-ended like that — the gateway was
-  right there. The fallback only triggered when Anthropic FAILED, not when it
-  was missing entirely.
-
-  Now: no Anthropic configured + gateway key present = it just uses the
-  gateway, tells you it's in brain building mode, and mentions that adding the
-  Worker URL in Settings restores full function. It only shows a hard error
-  when neither is available.
+FILES
+  repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
+  js folder:  app.js, state.js, budget-engine.js, reentry.js,
+              blue-bonnet-widget-organize.js
+  Upload from INSIDE this folder. Sidebar should then read v2026.08.16d.
