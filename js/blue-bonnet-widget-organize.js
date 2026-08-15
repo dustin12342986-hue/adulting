@@ -40,7 +40,7 @@
    =========================================================================== */
 const BB = (() => {
   const GATEWAY = "https://blue-bonnet-gateway.dustin12342986.workers.dev";
-  const KEY     = "PUT_YOUR_GATEWAY_KEY_HERE";   // <-- the only edit needed
+  const KEY     = "e368f85d1ce08cb81e252c1f9e31294b7d8dc88cf295be38";
   const APP     = "adulting";
 
   let lastInteractionId = null;

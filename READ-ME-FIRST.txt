@@ -1,30 +1,25 @@
-ADULTING  v2026.08.16f — honest error messages
+ADULTING  v2026.08.16g — gateway live, no Anthropic credit needed
 
-WHY THIS KEPT SAYING THE SAME THING
-  That "Set your Worker Proxy URL" message was a catch-all. It was shown for
-  EVERY failure, whatever the actual cause. Since v16e baked the URL in, the
-  URL was never the problem — the message was just hiding whatever really
-  went wrong.
+Your gateway key is installed. Just upload and it works.
 
-  It now names the actual cause:
-    401 / 403  -> Anthropic rejected the API key (check ANTHROPIC_API_KEY in
-                  your Cloudflare Worker's settings)
-    402 / credit -> out of Anthropic credit
-    429        -> rate limited, wait a minute
-    5xx        -> Worker error, check Cloudflare logs
-    network    -> couldn't reach the Worker at all
-  and every message now includes the raw error underneath.
-
-  My money is on the API key or credit. The next message will tell you which.
-
-ALSO FIXED
-  "Brain building mode" was never actually appearing. One of my edits silently
-  failed to match, so the gateway fallback ran but the banner explaining it
-  never rendered — and the interaction ID never reached the thumbs, so ratings
-  on those replies went nowhere. Both now work.
-
-FILES
   repo root:  index.html, manifest.json, sw.js, icon-192.png, icon-512.png
   js folder:  app.js, state.js, budget-engine.js, reentry.js,
               blue-bonnet-widget-organize.js
-  Upload from INSIDE this folder. Sidebar should read v2026.08.16f.
+
+Upload from INSIDE this folder. Hard-refresh. Sidebar reads v2026.08.16g.
+
+WHAT HAPPENS NOW
+  Blue Bonnet tries Anthropic, gets the out-of-credit error, and immediately
+  re-asks your gateway (Groq / Gemini). You get an answer either way. Replies
+  that came from the gateway are labelled "Brain building mode".
+
+  Tested against a simulated out-of-credit response: falls back, answers, and
+  never shows you the credit error.
+
+WHAT STILL NEEDS ANTHROPIC CREDIT
+  Adding bills, building budgets, logging transactions, reading statements.
+  Those use tool-calling, which the free providers don't support. Blue Bonnet
+  will say so rather than pretending it did something.
+
+  Add credit whenever you want those back — the gateway then just sits there
+  as a safety net for the next outage.
